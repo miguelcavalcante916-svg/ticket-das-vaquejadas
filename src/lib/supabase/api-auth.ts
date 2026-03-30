@@ -1,0 +1,42 @@
+import { createServerClient } from "@supabase/ssr";
+import type { NextRequest } from "next/server";
+
+export async function getApiUserRole(request: NextRequest) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) return null;
+
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll() {
+        // no-op
+      },
+    },
+  });
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return null;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  return {
+    userId: user.id,
+    role: (profile?.role as string | undefined) ?? "user",
+    email: user.email ?? null,
+  };
+}
+
+export function isOrganizerOrAdmin(role: string | undefined) {
+  return role === "organizer" || role === "admin";
+}
+

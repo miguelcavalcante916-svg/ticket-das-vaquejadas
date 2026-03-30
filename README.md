@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ticket das Vaquejadas
 
-## Getting Started
+Plataforma profissional para divulgação e venda antecipada de ingressos/senhas de vaquejadas no Brasil.
 
-First, run the development server:
+## Stack
+
+- Next.js 15 (App Router) + TypeScript
+- Tailwind CSS + shadcn/ui (componentes)
+- Supabase (Auth + Postgres)
+- Mercado Pago (Pix)
+- Deploy: Netlify
+
+## Rotas
+
+**Público**
+- `/` Home (hero + filtros + grid)
+- `/eventos` Listagem
+- `/eventos/[slug]` Detalhes + seleção de ingressos
+- `/checkout/[orderId]` Checkout Pix + status
+- `/meus-ingressos` Ingressos do usuário logado
+- `/login` / `/cadastro` / `/suporte`
+
+**Admin**
+- `/admin` Dashboard
+- `/admin/eventos` / `/admin/eventos/novo` / `/admin/eventos/[id]` / `/admin/eventos/[id]/editar`
+- `/admin/eventos/[id]/lotes` / `/admin/eventos/[id]/vendas` / `/admin/eventos/[id]/checkin`
+- `/admin/pedidos` / `/admin/clientes` / `/admin/relatorios` / `/admin/configuracoes`
+
+**API (App Router)**
+- `/api/auth/callback`
+- `/api/mercado-pago/criar-pagamento`
+- `/api/mercado-pago/webhook`
+- `/api/mercado-pago/consultar-status`
+- `/api/tickets/validar`
+- `/api/tickets/reenviar`
+- `/api/eventos` / `/api/eventos/[id]`
+- `/api/orders` / `/api/orders/[id]`
+
+## Configuração
+
+1) Instale dependências:
+
+```bash
+npm install
+```
+
+Se você estiver no Windows PowerShell com policy bloqueando scripts, use:
+
+```bash
+npm.cmd install
+```
+
+2) Variáveis de ambiente:
+
+- Copie `.env.example` para `.env.local` e preencha.
+- Obrigatórias para Supabase:
+  - `NEXT_PUBLIC_SUPABASE_URL`
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+- Obrigatórias para Pix Mercado Pago:
+  - `MERCADO_PAGO_ACCESS_TOKEN`
+  - `MERCADO_PAGO_WEBHOOK_SECRET` (recomendado)
+
+3) Banco de dados (Supabase)
+
+- As migrations iniciais estão em `supabase/migrations/20260330190000_init.sql`.
+- Aplique via Supabase CLI ou colando no SQL Editor do seu projeto.
+
+4) Rodar local:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abra `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Admin (roles)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+O middleware bloqueia `/admin` para usuários com `profiles.role` diferente de `organizer` ou `admin`.
 
-## Learn More
+Para testar, após criar um usuário no Supabase Auth, ajuste:
 
-To learn more about Next.js, take a look at the following resources:
+```sql
+update public.profiles set role = 'organizer' where email = 'seu@email.com';
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Deploy no Netlify
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1) Suba o repositório e conecte no Netlify.
+2) Defina as env vars no painel do Netlify (as mesmas do `.env.example`).
+3) O projeto já inclui `netlify.toml` com `@netlify/plugin-nextjs`.
 
-## Deploy on Vercel
+## Observações
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Por segurança, escrita no banco é feita via rotas API usando `SUPABASE_SERVICE_ROLE_KEY`.
+- Sem env (sem Supabase), a UI usa dados de demonstração para não travar o `npm run dev`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
