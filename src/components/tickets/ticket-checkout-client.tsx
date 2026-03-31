@@ -19,6 +19,10 @@ export function TicketCheckoutClient({
   const onCheckout = async (items: TicketSelection[]) => {
     try {
       setError(null);
+      console.info("[checkout] ticket types selected", {
+        eventId,
+        items,
+      });
 
       const res = await fetch("/api/orders", {
         method: "POST",
@@ -37,7 +41,33 @@ export function TicketCheckoutClient({
         return;
       }
 
-      router.push(`/checkout/${encodeURIComponent(orderId)}`);
+      console.info("[checkout] order created", { orderId });
+
+      const route = `/checkout/${encodeURIComponent(orderId)}`;
+      const verifyRes = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!verifyRes.ok) {
+        const verifyData = (await verifyRes.json().catch(() => null)) as
+          | { message?: string }
+          | null;
+
+        console.warn("[checkout] order verification failed", {
+          orderId,
+          status: verifyRes.status,
+          message: verifyData?.message ?? null,
+        });
+        setError(
+          verifyData?.message ??
+            "O pedido foi criado, mas o checkout ainda não ficou disponível. Tente novamente.",
+        );
+        return;
+      }
+
+      console.info("[checkout] redirecting", { route });
+      router.push(route);
     } catch {
       setError("Não foi possível iniciar sua compra agora. Tente novamente.");
     }

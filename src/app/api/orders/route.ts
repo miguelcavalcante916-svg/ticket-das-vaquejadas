@@ -109,11 +109,21 @@ export async function POST(request: NextRequest) {
   }
 
   if (!hasServiceSupabaseEnv()) {
-    return NextResponse.json({ orderId: crypto.randomUUID() }, { status: 201 });
+    const fallbackOrderId = crypto.randomUUID();
+    console.info("[orders] service env missing, returning fallback order", {
+      eventId: parsed.data.eventId,
+      items: parsed.data.items,
+      orderId: fallbackOrderId,
+    });
+    return NextResponse.json({ orderId: fallbackOrderId }, { status: 201 });
   }
 
   const supabase = createSupabaseServiceRoleClient();
   const { eventId, items, buyerEmail, buyerName, buyerDocument } = parsed.data;
+  console.info("[orders] create request", {
+    eventId,
+    items,
+  });
 
   let userId: string | null = null;
   let resolvedBuyerEmail = buyerEmail ?? null;
@@ -238,6 +248,10 @@ export async function POST(request: NextRequest) {
     }
 
     const orderId = orderRow.id as string;
+    console.info("[orders] order created", {
+      orderId,
+      eventId,
+    });
 
     const { error: itemsError } = await supabase
       .from("order_items")
@@ -247,10 +261,23 @@ export async function POST(request: NextRequest) {
       throw new Error(itemsError?.message ?? "Falha ao criar itens do pedido.");
     }
 
+    console.info("[orders] order items created", {
+      orderId,
+      items: orderItemsToInsert.map((item) => ({
+        ticketTypeId: item.ticket_type_id,
+        quantity: item.quantity,
+      })),
+    });
+
     return NextResponse.json({ orderId }, { status: 201 });
   } catch (error) {
     await rollbackStockReservations(ticketTypeRows, reserved);
     const message = error instanceof Error ? error.message : "Falha ao criar pedido.";
+    console.error("[orders] create failed", {
+      eventId,
+      items,
+      message,
+    });
     return apiError(500, message);
   }
 }

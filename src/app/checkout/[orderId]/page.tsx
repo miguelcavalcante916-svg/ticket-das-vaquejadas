@@ -7,10 +7,14 @@ import { getOrderById } from "@/services/orders";
 export default async function CheckoutPage({
   params,
 }: {
-  params: Promise<{ orderId: string }>;
+  params: Promise<{ orderId?: string }>;
 }) {
   const { orderId } = await params;
-  const normalizedOrderId = orderId.trim();
+  const normalizedOrderId = orderId?.trim() ?? "";
+
+  console.info("[checkout-page] loading", {
+    orderId: normalizedOrderId || null,
+  });
 
   if (!normalizedOrderId) {
     return (
@@ -28,6 +32,10 @@ export default async function CheckoutPage({
   const order = await getOrderById(normalizedOrderId);
 
   if (!order) {
+    console.warn("[checkout-page] order not found", {
+      orderId: normalizedOrderId,
+    });
+
     return (
       <div className="container py-10">
         <EmptyState
