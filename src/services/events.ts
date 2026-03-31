@@ -2,7 +2,10 @@ import type { Event, TicketType } from "@/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { MOCK_EVENTS, mockEventBySlug, mockTicketTypesForEvent } from "@/services/mock-data";
 
-type EventWithPrice = Event & { startingPriceCents?: number | null };
+type EventWithCheckout = Event & {
+  startingPriceCents?: number | null;
+  defaultTicketTypeId?: string | null;
+};
 
 type EventRow = {
   id: string;
@@ -32,9 +35,12 @@ type TicketTypeRow = {
   is_active: boolean;
 };
 
-type TicketTypeMinPriceRow = {
+type TicketTypeSummaryRow = {
+  id: string;
   event_id: string;
   price_cents: number;
+  quantity_total: number;
+  quantity_sold?: number | null;
   is_active: boolean;
 };
 
@@ -76,13 +82,32 @@ function mapTicketType(row: TicketTypeRow): TicketType {
   };
 }
 
-export async function listPublicEvents(): Promise<EventWithPrice[]> {
+function getDefaultTicketTypeId(ticketTypes: Array<{
+  id: string;
+  priceCents: number;
+  quantityTotal: number;
+  quantitySold: number;
+  isActive: boolean;
+}>) {
+  const saleable = ticketTypes
+    .filter((ticket) => ticket.isActive && ticket.quantityTotal - ticket.quantitySold > 0)
+    .sort((left, right) => left.priceCents - right.priceCents);
+
+  return saleable[0]?.id ?? null;
+}
+
+export async function listPublicEvents(): Promise<EventWithCheckout[]> {
   if (!hasSupabaseEnv()) {
-    return MOCK_EVENTS.map((e) => {
-      const types = mockTicketTypesForEvent(e.id).filter((t) => t.isActive);
+    return MOCK_EVENTS.map((event) => {
+      const ticketTypes = mockTicketTypesForEvent(event.id).filter((ticket) => ticket.isActive);
       const startingPriceCents =
-        types.length > 0 ? Math.min(...types.map((t) => t.priceCents)) : null;
-      return { ...e, startingPriceCents };
+        ticketTypes.length > 0 ? Math.min(...ticketTypes.map((ticket) => ticket.priceCents)) : null;
+
+      return {
+        ...event,
+        startingPriceCents,
+        defaultTicketTypeId: getDefaultTicketTypeId(ticketTypes),
+      };
     });
   }
 
@@ -98,30 +123,49 @@ export async function listPublicEvents(): Promise<EventWithPrice[]> {
     .limit(60);
 
   if (error || !data) {
-    return MOCK_EVENTS.map((e) => ({ ...e, startingPriceCents: null }));
+    return MOCK_EVENTS.map((event) => ({
+      ...event,
+      startingPriceCents: null,
+      defaultTicketTypeId: getDefaultTicketTypeId(mockTicketTypesForEvent(event.id)),
+    }));
   }
 
   const rows = data as EventRow[];
   const events = rows.map(mapEvent);
-  const eventIds = events.map((e) => e.id);
+  const eventIds = events.map((event) => event.id);
 
   const { data: typesData } = await supabase
     .from("ticket_types")
-    .select("event_id,price_cents,is_active")
+    .select("id,event_id,price_cents,quantity_total,quantity_sold,is_active")
     .in("event_id", eventIds)
     .eq("is_active", true);
 
-  const minPriceByEvent = new Map<string, number>();
-  for (const t of (typesData ?? []) as TicketTypeMinPriceRow[]) {
-    const prev = minPriceByEvent.get(t.event_id);
-    const next = t.price_cents;
-    if (typeof prev !== "number" || next < prev) minPriceByEvent.set(t.event_id, next);
+  const ticketTypesByEvent = new Map<string, TicketTypeSummaryRow[]>();
+
+  for (const ticketType of (typesData ?? []) as TicketTypeSummaryRow[]) {
+    const list = ticketTypesByEvent.get(ticketType.event_id) ?? [];
+    list.push(ticketType);
+    ticketTypesByEvent.set(ticketType.event_id, list);
   }
 
-  return events.map((e) => ({
-    ...e,
-    startingPriceCents: minPriceByEvent.get(e.id) ?? null,
-  }));
+  return events.map((event) => {
+    const ticketTypes = ticketTypesByEvent.get(event.id) ?? [];
+    const saleable = ticketTypes.filter(
+      (ticketType) =>
+        ticketType.is_active &&
+        ticketType.quantity_total - (ticketType.quantity_sold ?? 0) > 0,
+    );
+
+    return {
+      ...event,
+      startingPriceCents:
+        saleable.length > 0
+          ? Math.min(...saleable.map((ticketType) => ticketType.price_cents))
+          : null,
+      defaultTicketTypeId:
+        saleable.sort((left, right) => left.price_cents - right.price_cents)[0]?.id ?? null,
+    };
+  });
 }
 
 export async function getEventBySlug(slug: string): Promise<{

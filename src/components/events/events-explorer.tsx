@@ -7,7 +7,10 @@ import { EmptyState } from "@/components/empty-state";
 import { EventFilters, type EventFiltersValue } from "@/components/events/event-filters";
 import { EventGrid } from "@/components/events/event-grid";
 
-type EventWithPrice = Event & { startingPriceCents?: number | null };
+type EventWithCheckout = Event & {
+  startingPriceCents?: number | null;
+  defaultTicketTypeId?: string | null;
+};
 
 function normalize(text: string) {
   return text
@@ -16,7 +19,7 @@ function normalize(text: string) {
     .toLowerCase();
 }
 
-export function EventsExplorer({ events }: { events: EventWithPrice[] }) {
+export function EventsExplorer({ events }: { events: EventWithCheckout[] }) {
   const [filters, setFilters] = React.useState<EventFiltersValue>({
     query: "",
     state: "all",
@@ -26,11 +29,13 @@ export function EventsExplorer({ events }: { events: EventWithPrice[] }) {
   const filtered = React.useMemo(() => {
     const q = normalize(filters.query);
     const city = normalize(filters.city);
-    return events.filter((e) => {
-      const haystack = normalize(`${e.title} ${e.description} ${e.city} ${e.state}`);
+    return events.filter((event) => {
+      const haystack = normalize(
+        `${event.title} ${event.description} ${event.city} ${event.state}`,
+      );
       const okQuery = q ? haystack.includes(q) : true;
-      const okState = filters.state === "all" ? true : e.state === filters.state;
-      const okCity = city ? normalize(e.city).includes(city) : true;
+      const okState = filters.state === "all" ? true : event.state === filters.state;
+      const okCity = city ? normalize(event.city).includes(city) : true;
       return okQuery && okState && okCity;
     });
   }, [events, filters.city, filters.query, filters.state]);
@@ -49,4 +54,3 @@ export function EventsExplorer({ events }: { events: EventWithPrice[] }) {
     </div>
   );
 }
-

@@ -23,6 +23,7 @@ export function TicketSelector({
 }) {
   const [items, setItems] = React.useState<Record<string, number>>({});
   const [submitting, setSubmitting] = React.useState(false);
+  const [submittingTicketId, setSubmittingTicketId] = React.useState<string | null>(null);
 
   const saleableTicketTypes = ticketTypes.filter((ticket) => {
     const available = ticket.quantityTotal - ticket.quantitySold;
@@ -55,9 +56,21 @@ export function TicketSelector({
     if (!canSubmit) return;
     try {
       setSubmitting(true);
+      setSubmittingTicketId(null);
       await onCheckout(selections);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const quickBuy = async (ticketTypeId: string, quantity: number) => {
+    try {
+      setSubmitting(true);
+      setSubmittingTicketId(ticketTypeId);
+      await onCheckout([{ ticketTypeId, quantity }]);
+    } finally {
+      setSubmitting(false);
+      setSubmittingTicketId(null);
     }
   };
 
@@ -84,11 +97,11 @@ export function TicketSelector({
           <div>
             <p className="text-lg font-extrabold">Ingressos & Lotes</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Selecione a quantidade e avance para pagamento via Pix.
+              Escolha um lote e clique em comprar para criar o pedido e seguir ao checkout.
             </p>
           </div>
           <div className="hidden text-right sm:block">
-            <p className="text-xs text-muted-foreground">Total</p>
+            <p className="text-xs text-muted-foreground">Total selecionado</p>
             <p className="text-xl font-extrabold text-gold">
               {formatBRLFromCents(totalCents)}
             </p>
@@ -100,35 +113,36 @@ export function TicketSelector({
             const qty = items[ticket.id] ?? 0;
             const available = Math.max(0, ticket.quantityTotal - ticket.quantitySold);
             const disabled = !ticket.isActive || available <= 0;
+            const quickBuyQuantity = Math.max(1, qty);
 
             return (
               <div
                 key={ticket.id}
-                className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-black/25 p-4 sm:flex-row sm:items-center sm:justify-between"
+                className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-black/25 p-4"
               >
-                <div>
-                  <p className="text-sm font-bold">{ticket.name}</p>
-                  {ticket.description ? (
-                    <p className="mt-1 text-sm text-muted-foreground">{ticket.description}</p>
-                  ) : null}
-                  <p className="mt-2 text-sm font-extrabold text-gold">
-                    {formatBRLFromCents(ticket.priceCents)}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {disabled
-                      ? "Lote indisponível"
-                      : `${available} ingresso${available > 1 ? "s" : ""} disponível${available > 1 ? "eis" : ""}`}
-                  </p>
-                </div>
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-bold">{ticket.name}</p>
+                    {ticket.description ? (
+                      <p className="mt-1 text-sm text-muted-foreground">{ticket.description}</p>
+                    ) : null}
+                    <p className="mt-2 text-sm font-extrabold text-gold">
+                      {formatBRLFromCents(ticket.priceCents)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {disabled
+                        ? "Lote indisponível"
+                        : `${available} ingresso${available > 1 ? "s" : ""} disponível${available > 1 ? "eis" : ""}`}
+                    </p>
+                  </div>
 
-                <div className="flex items-center justify-between gap-3 sm:justify-end">
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
                       variant="outline"
                       size="icon"
                       onClick={() => adjust(ticket.id, -1, available)}
-                      disabled={disabled || qty <= 0}
+                      disabled={disabled || qty <= 0 || submitting}
                       aria-label="Diminuir"
                     >
                       <Minus className="h-4 w-4" />
@@ -139,12 +153,31 @@ export function TicketSelector({
                       variant="outline"
                       size="icon"
                       onClick={() => adjust(ticket.id, 1, available)}
-                      disabled={disabled || qty >= available}
+                      disabled={disabled || qty >= available || submitting}
                       aria-label="Aumentar"
                     >
                       <Plus className="h-4 w-4" />
                     </Button>
                   </div>
+                </div>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs text-muted-foreground">
+                    Clique em comprar para criar um pedido deste lote com{" "}
+                    <span className="font-semibold text-foreground">{quickBuyQuantity}</span>{" "}
+                    ingresso{quickBuyQuantity > 1 ? "s" : ""}.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="gold"
+                    onClick={() => quickBuy(ticket.id, quickBuyQuantity)}
+                    disabled={disabled || submitting}
+                    className="w-full sm:w-auto"
+                  >
+                    {submitting && submittingTicketId === ticket.id
+                      ? "Criando pedido..."
+                      : "Comprar"}
+                  </Button>
                 </div>
               </div>
             );
@@ -153,7 +186,7 @@ export function TicketSelector({
 
         <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="sm:hidden">
-            <p className="text-xs text-muted-foreground">Total</p>
+            <p className="text-xs text-muted-foreground">Total selecionado</p>
             <p className="text-xl font-extrabold text-gold">
               {formatBRLFromCents(totalCents)}
             </p>
@@ -161,13 +194,13 @@ export function TicketSelector({
 
           <Button
             type="button"
-            variant="gold"
+            variant="outline"
             size="xl"
             onClick={submit}
             disabled={!canSubmit}
             className="w-full sm:w-auto"
           >
-            {submitting ? "Criando pedido..." : "Comprar via Pix"}
+            {submitting && !submittingTicketId ? "Criando pedido..." : "Comprar seleção"}
           </Button>
         </div>
       </CardContent>
