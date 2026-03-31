@@ -8,7 +8,6 @@ import { hasServiceSupabaseEnv } from "@/lib/env/server";
 import { getApiUserRole, isOrganizerOrAdmin } from "@/lib/supabase/api-auth";
 import { getOrganizerIdForUser } from "@/lib/supabase/access";
 import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
-import { MOCK_EVENTS } from "@/services/mock-data";
 
 export const runtime = "nodejs";
 
@@ -42,7 +41,7 @@ export async function GET(request: NextRequest) {
   const city = url.searchParams.get("city")?.trim() ?? "";
 
   if (!hasPublicSupabaseEnv()) {
-    return NextResponse.json({ events: MOCK_EVENTS });
+    return NextResponse.json({ events: [] });
   }
 
   const publicEnv = requirePublicSupabaseEnv();

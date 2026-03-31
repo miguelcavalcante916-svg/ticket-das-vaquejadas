@@ -2,13 +2,11 @@ import Link from "next/link";
 import { createClient } from "@supabase/supabase-js";
 import { CalendarDays, Pencil, QrCode, Ticket, Users } from "lucide-react";
 
-import type { Event, TicketType } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatDateBR } from "@/lib/utils/date";
-import { MOCK_EVENTS, mockTicketTypesForEvent } from "@/services/mock-data";
 
 type DisplayEvent = {
   id: string;
@@ -36,26 +34,6 @@ function hasAnonEnv() {
   );
 }
 
-function mapMockEvent(mock: Event): DisplayEvent {
-  return {
-    id: mock.id,
-    organizerId: mock.organizerId ?? null,
-    slug: mock.slug,
-    title: mock.title,
-    description: mock.description,
-    startDate: mock.startDate,
-    city: mock.city,
-    state: mock.state,
-    venueName: mock.venueName ?? null,
-    status: mock.status,
-    featured: Boolean(mock.featured),
-  };
-}
-
-function mapMockTicketTypes(types: TicketType[]): DisplayTicketType[] {
-  return types.map((t) => ({ id: t.id, name: t.name, isActive: t.isActive }));
-}
-
 export default async function AdminEventoDetalhePage({
   params,
 }: {
@@ -70,11 +48,7 @@ export default async function AdminEventoDetalhePage({
     process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
   );
 
-  if (!hasAnonEnv() || !hasServiceEnv) {
-    const mock = MOCK_EVENTS.find((e) => e.id === id) ?? null;
-    event = mock ? mapMockEvent(mock) : null;
-    ticketTypes = mock ? mapMockTicketTypes(mockTicketTypesForEvent(mock.id)) : [];
-  } else {
+  if (hasAnonEnv() && hasServiceEnv) {
     const auth = await createSupabaseServerClient();
     const {
       data: { user },
@@ -224,4 +198,3 @@ export default async function AdminEventoDetalhePage({
     </div>
   );
 }
-

@@ -76,7 +76,7 @@ export function EventCard({
           <Link href={`/eventos/${event.slug}`}>Ver detalhes</Link>
         </Button>
         <Button asChild variant="gold" className="w-full">
-          <Link href={`/eventos/${event.slug}#ingressos`}>Comprar</Link>
+          <Link href={`/eventos/${event.slug}`}>Comprar</Link>
         </Button>
       </CardFooter>
     </Card>

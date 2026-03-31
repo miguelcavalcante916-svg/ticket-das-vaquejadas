@@ -8,7 +8,6 @@ import { hasServiceSupabaseEnv } from "@/lib/env/server";
 import { getApiUserRole, isOrganizerOrAdmin } from "@/lib/supabase/api-auth";
 import { canManageEvent } from "@/lib/supabase/access";
 import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
-import { MOCK_EVENTS, mockTicketTypesForEvent } from "@/services/mock-data";
 
 export const runtime = "nodejs";
 
@@ -42,11 +41,7 @@ export async function GET(
   const { id } = await params;
 
   if (!hasPublicSupabaseEnv()) {
-    const event = MOCK_EVENTS.find((entry) => entry.id === id) ?? null;
-    return NextResponse.json({
-      event,
-      ticketTypes: event ? mockTicketTypesForEvent(event.id) : [],
-    });
+    return NextResponse.json({ event: null, ticketTypes: [] });
   }
 
   const auth = await getApiUserRole(request);
