@@ -49,9 +49,7 @@ export function PublicHeader() {
         <nav className="hidden items-center gap-6 md:flex">
           {NAV.map((item) => {
             const active =
-              item.href === "/"
-                ? pathname === "/"
-                : pathname.startsWith(item.href);
+              pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <Link
                 key={item.href}
@@ -100,4 +98,3 @@ export function PublicHeader() {
     </header>
   );
 }
-

@@ -54,11 +54,11 @@ function mapEvent(row: EventRow): Event {
     startDate: row.start_date,
     endDate: row.end_date ?? null,
     city: row.city,
-    state: row.state,
+    state: row.state as Event["state"],
     venueName: row.venue_name ?? null,
     address: row.address ?? null,
     coverImageUrl: row.cover_image_url ?? null,
-    status: row.status ?? "published",
+    status: (row.status as Event["status"]) ?? "published",
     featured: Boolean(row.featured),
   };
 }

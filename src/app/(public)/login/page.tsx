@@ -1,4 +1,7 @@
+import { Suspense } from "react";
+
 import { LoginForm } from "@/components/auth/login-form";
+import { LoadingSpinner } from "@/components/loading-spinner";
 import { Badge } from "@/components/ui/badge";
 
 export const metadata = {
@@ -18,9 +21,10 @@ export default function LoginPage() {
             Use seu e-mail e senha para acessar ingressos e área do organizador.
           </p>
         </div>
-        <LoginForm />
+        <Suspense fallback={<LoadingSpinner label="Carregando…" />}>
+          <LoginForm />
+        </Suspense>
       </div>
     </div>
   );
 }
-
