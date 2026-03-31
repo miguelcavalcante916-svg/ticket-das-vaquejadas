@@ -60,6 +60,8 @@ npm.cmd install
 - Obrigatórias para Pix Mercado Pago:
   - `MERCADO_PAGO_ACCESS_TOKEN`
   - `MERCADO_PAGO_WEBHOOK_SECRET` (recomendado)
+ - Em produção, defina:
+   - `NEXT_PUBLIC_SITE_URL=https://ticketdavaquejada.netlify.app`
 
 3) Banco de dados (Supabase)
 
@@ -94,4 +96,3 @@ update public.profiles set role = 'organizer' where email = 'seu@email.com';
 
 - Por segurança, escrita no banco é feita via rotas API usando `SUPABASE_SERVICE_ROLE_KEY`.
 - Sem env (sem Supabase), a UI usa dados de demonstração para não travar o `npm run dev`.
-

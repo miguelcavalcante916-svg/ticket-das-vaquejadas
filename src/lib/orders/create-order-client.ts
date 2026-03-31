@@ -8,6 +8,19 @@ type CreateOrderResponse = {
   message?: string;
 };
 
+function resolveClientOrigin() {
+  if (typeof window === "undefined") return "";
+  return window.location.origin.replace(/\/$/, "");
+}
+
+function describeError(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  return fallback;
+}
+
 export async function createOrderAndResolveCheckout({
   eventId,
   items,
@@ -20,11 +33,29 @@ export async function createOrderAndResolveCheckout({
     items,
   });
 
-  const res = await fetch("/api/orders", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ eventId, items }),
-  });
+  const ordersEndpoint = "/api/orders";
+  const origin = resolveClientOrigin();
+
+  let res: Response;
+  try {
+    res = await fetch(ordersEndpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ eventId, items }),
+    });
+  } catch (error) {
+    console.error("[checkout] request failed", {
+      endpoint: `${origin}${ordersEndpoint}`,
+      message: describeError(error, "Falha de rede ao criar o pedido."),
+    });
+
+    throw new Error(
+      `Falha ao chamar ${origin}${ordersEndpoint}: ${describeError(
+        error,
+        "verifique o domínio e a conectividade da API.",
+      )}`,
+    );
+  }
 
   const data = (await res.json().catch(() => null)) as CreateOrderResponse | null;
   const orderId = typeof data?.orderId === "string" ? data.orderId.trim() : "";
@@ -35,10 +66,28 @@ export async function createOrderAndResolveCheckout({
 
   console.info("[checkout] order created", { orderId });
 
-  const verifyRes = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
-    method: "GET",
-    cache: "no-store",
-  });
+  const verifyEndpoint = `/api/orders/${encodeURIComponent(orderId)}`;
+
+  let verifyRes: Response;
+  try {
+    verifyRes = await fetch(verifyEndpoint, {
+      method: "GET",
+      cache: "no-store",
+    });
+  } catch (error) {
+    console.error("[checkout] verify request failed", {
+      endpoint: `${origin}${verifyEndpoint}`,
+      orderId,
+      message: describeError(error, "Falha de rede ao validar o pedido."),
+    });
+
+    throw new Error(
+      `Falha ao validar ${origin}${verifyEndpoint}: ${describeError(
+        error,
+        "verifique o domínio e a conectividade da API.",
+      )}`,
+    );
+  }
 
   if (!verifyRes.ok) {
     const verifyData = (await verifyRes.json().catch(() => null)) as

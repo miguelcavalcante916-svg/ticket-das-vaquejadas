@@ -2,6 +2,7 @@ import { z } from "zod";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { apiError, apiValidationError } from "@/lib/api/http";
+import { getPublicSiteUrl } from "@/lib/env/public";
 import { createPixPayment } from "@/lib/mercado-pago/create-payment";
 import { hasMercadoPagoAccessToken, hasServiceSupabaseEnv } from "@/lib/env/server";
 import { finalizePaidOrder } from "@/lib/orders/finalize-paid-order";
@@ -10,9 +11,6 @@ import { canAccessGuestOrder, canAccessOrder } from "@/lib/supabase/access";
 import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
-
-const MERCADO_PAGO_NOTIFICATION_URL =
-  "https://ticketdasvaquejada.netlify.app/api/mercado-pago/webhook";
 
 const schema = z.object({
   orderId: z.string().trim().min(1),
@@ -103,12 +101,14 @@ export async function POST(request: NextRequest) {
 
   let payment;
   try {
+    const notificationUrl = `${getPublicSiteUrl()}/api/mercado-pago/webhook`;
+
     payment = await createPixPayment({
       orderId,
       amountCents: order.total_cents as number,
       payerEmail: (order.buyer_email as string | null) ?? "comprador@exemplo.com",
       description: `Ticket das Vaquejadas | Pedido ${orderId}`,
-      notificationUrl: MERCADO_PAGO_NOTIFICATION_URL,
+      notificationUrl,
     });
   } catch (error) {
     return apiError(

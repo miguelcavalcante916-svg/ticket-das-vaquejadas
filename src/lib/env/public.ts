@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const PRODUCTION_SITE_URL = "https://ticketdavaquejada.netlify.app";
+
 const publicEnvSchema = z.object({
   NEXT_PUBLIC_SUPABASE_URL: z.string().url().optional(),
   NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1).optional(),
@@ -39,6 +41,13 @@ export function requirePublicSupabaseEnv() {
 
 export function getPublicSiteUrl() {
   const env = getPublicEnv();
-  return env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-}
+  if (env.NEXT_PUBLIC_SITE_URL) {
+    return env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, "");
+  }
 
+  if (process.env.NODE_ENV === "production") {
+    return PRODUCTION_SITE_URL;
+  }
+
+  return "http://localhost:3000";
+}
