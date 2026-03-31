@@ -1,8 +1,7 @@
-import { notFound } from "next/navigation";
-
 import { CheckoutPaymentClient } from "@/components/checkout/checkout-payment-client";
 import { CheckoutSummary } from "@/components/checkout/checkout-summary";
 import { PaymentStatus } from "@/components/checkout/payment-status";
+import { EmptyState } from "@/components/empty-state";
 import { getOrderById } from "@/services/orders";
 
 export default async function CheckoutPage({
@@ -11,8 +10,35 @@ export default async function CheckoutPage({
   params: Promise<{ orderId: string }>;
 }) {
   const { orderId } = await params;
-  const order = await getOrderById(orderId);
-  if (!order) notFound();
+  const normalizedOrderId = orderId.trim();
+
+  if (!normalizedOrderId) {
+    return (
+      <div className="container py-10">
+        <EmptyState
+          title="Pedido inválido"
+          description="Não conseguimos abrir o checkout porque o identificador do pedido não foi informado corretamente."
+          actionLabel="Voltar para eventos"
+          actionHref="/eventos"
+        />
+      </div>
+    );
+  }
+
+  const order = await getOrderById(normalizedOrderId);
+
+  if (!order) {
+    return (
+      <div className="container py-10">
+        <EmptyState
+          title="Pedido não encontrado"
+          description="Seu checkout ainda não foi localizado. Tente iniciar a compra novamente a partir do evento."
+          actionLabel="Escolher ingressos"
+          actionHref="/eventos"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="container py-10">
@@ -33,4 +59,3 @@ export default async function CheckoutPage({
     </div>
   );
 }
-
