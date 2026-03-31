@@ -96,6 +96,9 @@ export default async function HomePage() {
               Busque por nome, filtre por estado e cidade, e compre em poucos
               passos.
             </p>
+            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-gold/80">
+              Quantidade de eventos: {events.length}
+            </p>
           </div>
         </div>
         <div className="mt-8">

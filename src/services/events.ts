@@ -1,13 +1,8 @@
 import { unstable_noStore as noStore } from "next/cache";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js";
 
 import type { Event, TicketType } from "@/types";
-import { hasPublicSupabaseEnv } from "@/lib/env/public";
-import { hasServiceSupabaseEnv } from "@/lib/env/server";
-import {
-  createSupabaseServerClient,
-  createSupabaseServiceRoleClient,
-} from "@/lib/supabase/server";
+import { requirePublicSupabaseEnv } from "@/lib/env/public";
 
 export type EventWithPrice = Event & { startingPriceCents?: number | null };
 
@@ -23,10 +18,20 @@ export type PublicEventDetailResult = {
 };
 
 type GenericRow = Record<string, unknown>;
-type EventsReader = {
-  client: SupabaseClient;
-  source: "service-role" | "anon";
-};
+
+function createPublicSupabaseClient() {
+  const { url, anonKey } = requirePublicSupabaseEnv();
+
+  console.log("SUPABASE_URL:", url);
+  console.log("SUPABASE_ANON_CONFIGURADA:", Boolean(anonKey));
+
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
 
 function getStringValue(row: GenericRow, keys: string[]) {
   for (const key of keys) {
@@ -67,77 +72,31 @@ function getBooleanValue(row: GenericRow, keys: string[]) {
   return null;
 }
 
-function formatEventDebugRows(rows: GenericRow[] | null) {
-  return (rows ?? []).map((row) => ({
-    id: getStringValue(row, ["id"]),
-    slug: getStringValue(row, ["slug"]),
-    title: getStringValue(row, ["title"]),
-    city: getStringValue(row, ["city"]),
-    state: getStringValue(row, ["state"]),
-    date: getStringValue(row, ["start_date", "date"]),
-    banner_url: getStringValue(row, ["banner_url", "cover_image_url"]),
-    status: getStringValue(row, ["status"]),
-  }));
-}
-
-function buildEnvError() {
-  const hasPublicEnv = hasPublicSupabaseEnv();
-  const hasServiceEnv = hasServiceSupabaseEnv();
-
-  if (!hasPublicEnv && !hasServiceEnv) {
-    return "Supabase não configurado. Defina NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY ou configure SUPABASE_SERVICE_ROLE_KEY no servidor.";
-  }
-
-  if (!hasPublicEnv && hasServiceEnv) {
-    return "A service role existe, mas NEXT_PUBLIC_SUPABASE_ANON_KEY não está configurada corretamente.";
-  }
-
-  return "Não foi possível criar o cliente do Supabase para listar eventos.";
-}
-
-async function createEventsReader(): Promise<EventsReader | null> {
-  if (hasServiceSupabaseEnv()) {
-    return {
-      client: createSupabaseServiceRoleClient(),
-      source: "service-role",
-    };
-  }
-
-  if (hasPublicSupabaseEnv()) {
-    return {
-      client: await createSupabaseServerClient(),
-      source: "anon",
-    };
-  }
-
-  return null;
-}
-
 function mapEvent(row: GenericRow): Event | null {
   const id = getStringValue(row, ["id"]);
-  const slug = getStringValue(row, ["slug"]);
   const title = getStringValue(row, ["title"]);
+  const slug = getStringValue(row, ["slug"]);
   const city = getStringValue(row, ["city"]);
   const state = getStringValue(row, ["state"]);
-  const startDate = getStringValue(row, ["start_date", "date"]);
+  const date = getStringValue(row, ["date", "start_date"]);
 
-  if (!id || !slug || !title || !city || !state || !startDate) {
+  if (!id || !title || !slug || !city || !state || !date) {
     return null;
   }
 
   return {
     id,
-    organizerId: getStringValue(row, ["organizer_id"]),
-    slug,
     title,
-    description: getStringValue(row, ["description"]) ?? "",
-    startDate,
-    endDate: getStringValue(row, ["end_date"]),
+    slug,
     city,
     state: state.toUpperCase() as Event["state"],
+    description: getStringValue(row, ["description"]) ?? "",
+    startDate: date,
+    endDate: getStringValue(row, ["end_date"]),
     venueName: getStringValue(row, ["venue_name"]),
     address: getStringValue(row, ["address"]),
-    coverImageUrl: getStringValue(row, ["cover_image_url", "banner_url"]),
+    coverImageUrl: getStringValue(row, ["banner_url", "cover_image_url"]),
+    organizerId: getStringValue(row, ["organizer_id"]),
     status: (getStringValue(row, ["status"]) as Event["status"]) ?? "published",
     featured: getBooleanValue(row, ["featured"]) ?? false,
   };
@@ -166,11 +125,6 @@ function mapTicketType(row: GenericRow): TicketType | null {
   };
 }
 
-function shouldExposeEvent(row: GenericRow) {
-  const status = getStringValue(row, ["status"]);
-  return status ? status === "published" : true;
-}
-
 function sortEventsByDate(events: Event[]) {
   return [...events].sort((left, right) => {
     const leftDate = new Date(left.startDate).getTime();
@@ -182,76 +136,53 @@ function sortEventsByDate(events: Event[]) {
 export async function listPublicEvents(): Promise<PublicEventsResult> {
   noStore();
 
-  const reader = await createEventsReader();
-  const hasPublicEnv = hasPublicSupabaseEnv();
-  const hasServiceEnv = hasServiceSupabaseEnv();
+  try {
+    const supabase = createPublicSupabaseClient();
 
-  console.info("[events] list env", {
-    hasPublicEnv,
-    hasServiceEnv,
-    reader: reader?.source ?? null,
-  });
+    const { data, error } = await supabase
+      .from("events")
+      .select("*")
+      .order("date", { ascending: true });
 
-  if (!reader) {
-    const error = buildEnvError();
-    console.error("[events] list config error", { error });
-    return { events: [], error };
-  }
+    console.log("EVENTOS:", data);
+    console.log("ERRO:", error);
+    console.log("QUANTIDADE_EVENTOS:", data?.length ?? 0);
 
-  const { data, error } = await reader.client.from("events").select("*").limit(60);
-  const rawRows = (data ?? null) as GenericRow[] | null;
+    if (error) {
+      return {
+        events: [],
+        error: `Falha ao carregar eventos: ${error.message}`,
+      };
+    }
 
-  console.info("[events] list raw result", {
-    source: reader.source,
-    error: error?.message ?? null,
-    count: rawRows?.length ?? 0,
-    rows: formatEventDebugRows(rawRows),
-  });
+    const rows = (data ?? []) as GenericRow[];
+    const events = sortEventsByDate(
+      rows.map(mapEvent).filter((event): event is Event => Boolean(event)),
+    );
 
-  if (error) {
-    const message = `Falha ao consultar a tabela events no Supabase: ${error.message}`;
-    console.error("[events] list query failed", {
-      source: reader.source,
-      error: error.message,
-    });
-    return { events: [], error: message };
-  }
+    if (!events.length) {
+      return {
+        events: [],
+        error: null,
+      };
+    }
 
-  const mappedEvents = sortEventsByDate(
-    (rawRows ?? [])
-      .filter(shouldExposeEvent)
-      .map(mapEvent)
-      .filter((event): event is Event => Boolean(event)),
-  );
+    const eventIds = events.map((event) => event.id);
+    const { data: ticketRows, error: ticketError } = await supabase
+      .from("ticket_types")
+      .select("*")
+      .in("event_id", eventIds);
 
-  console.info("[events] list mapped result", {
-    source: reader.source,
-    count: mappedEvents.length,
-  });
+    if (ticketError) {
+      return {
+        events: events.map((event) => ({ ...event, startingPriceCents: null })),
+        error: `Eventos carregados, mas os lotes falharam: ${ticketError.message}`,
+      };
+    }
 
-  if (!mappedEvents.length) {
-    return { events: [], error: null };
-  }
+    const minPriceByEvent = new Map<string, number>();
 
-  const eventIds = mappedEvents.map((event) => event.id);
-  const { data: ticketRows, error: ticketError } = await reader.client
-    .from("ticket_types")
-    .select("*")
-    .in("event_id", eventIds);
-
-  const rawTicketRows = (ticketRows ?? null) as GenericRow[] | null;
-
-  console.info("[events] ticket types raw result", {
-    source: reader.source,
-    error: ticketError?.message ?? null,
-    count: rawTicketRows?.length ?? 0,
-    rows: rawTicketRows,
-  });
-
-  const minPriceByEvent = new Map<string, number>();
-
-  if (!ticketError) {
-    for (const ticketType of (rawTicketRows ?? [])
+    for (const ticketType of ((ticketRows ?? []) as GenericRow[])
       .map(mapTicketType)
       .filter((type): type is TicketType => Boolean(type))) {
       if (!ticketType.isActive) continue;
@@ -260,120 +191,95 @@ export async function listPublicEvents(): Promise<PublicEventsResult> {
         minPriceByEvent.set(ticketType.eventId, ticketType.priceCents);
       }
     }
+
+    return {
+      events: events.map((event) => ({
+        ...event,
+        startingPriceCents: minPriceByEvent.get(event.id) ?? null,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Erro inesperado ao carregar eventos.";
+
+    console.log("EVENTOS:", null);
+    console.log("ERRO:", message);
+
+    return {
+      events: [],
+      error: message,
+    };
   }
-
-  const events = mappedEvents.map((event) => ({
-    ...event,
-    startingPriceCents: minPriceByEvent.get(event.id) ?? null,
-  }));
-
-  if (ticketError) {
-    const message = `Eventos carregados, mas os lotes não puderam ser lidos: ${ticketError.message}`;
-    console.error("[events] ticket types query failed", {
-      source: reader.source,
-      error: ticketError.message,
-    });
-    return { events, error: message };
-  }
-
-  return { events, error: null };
 }
 
 export async function getEventBySlug(slug: string): Promise<PublicEventDetailResult> {
   noStore();
 
-  const reader = await createEventsReader();
-  const hasPublicEnv = hasPublicSupabaseEnv();
-  const hasServiceEnv = hasServiceSupabaseEnv();
+  try {
+    const supabase = createPublicSupabaseClient();
 
-  console.info("[events] detail env", {
-    slug,
-    hasPublicEnv,
-    hasServiceEnv,
-    reader: reader?.source ?? null,
-  });
+    const { data, error } = await supabase
+      .from("events")
+      .select("*")
+      .eq("slug", slug)
+      .maybeSingle();
 
-  if (!reader) {
-    const error = buildEnvError();
-    console.error("[events] detail config error", { slug, error });
-    return { event: null, ticketTypes: [], error };
-  }
+    console.log("EVENTO_SLUG:", slug);
+    console.log("EVENTO_RESULTADO:", data);
+    console.log("ERRO_EVENTO:", error);
 
-  const { data, error } = await reader.client
-    .from("events")
-    .select("*")
-    .eq("slug", slug)
-    .maybeSingle();
+    if (error) {
+      return {
+        event: null,
+        ticketTypes: [],
+        error: `Falha ao carregar o evento: ${error.message}`,
+      };
+    }
 
-  const rawEvent = (data ?? null) as GenericRow | null;
+    const event = data ? mapEvent(data as GenericRow) : null;
 
-  console.info("[events] detail raw result", {
-    slug,
-    source: reader.source,
-    error: error?.message ?? null,
-    row: rawEvent
-      ? {
-          id: getStringValue(rawEvent, ["id"]),
-          slug: getStringValue(rawEvent, ["slug"]),
-          title: getStringValue(rawEvent, ["title"]),
-          date: getStringValue(rawEvent, ["start_date", "date"]),
-          banner_url: getStringValue(rawEvent, ["banner_url", "cover_image_url"]),
-          status: getStringValue(rawEvent, ["status"]),
-        }
-      : null,
-  });
+    if (!event) {
+      return {
+        event: null,
+        ticketTypes: [],
+        error: null,
+      };
+    }
 
-  if (error) {
-    const message = `Falha ao consultar o evento no Supabase: ${error.message}`;
-    console.error("[events] detail query failed", {
-      slug,
-      source: reader.source,
-      error: error.message,
-    });
-    return { event: null, ticketTypes: [], error: message };
-  }
+    const { data: ticketRows, error: ticketError } = await supabase
+      .from("ticket_types")
+      .select("*")
+      .eq("event_id", event.id);
 
-  if (!rawEvent || !shouldExposeEvent(rawEvent)) {
-    return { event: null, ticketTypes: [], error: null };
-  }
+    if (ticketError) {
+      return {
+        event,
+        ticketTypes: [],
+        error: `Evento carregado, mas os lotes falharam: ${ticketError.message}`,
+      };
+    }
 
-  const event = mapEvent(rawEvent);
-  if (!event) {
+    return {
+      event,
+      ticketTypes: ((ticketRows ?? []) as GenericRow[])
+        .map(mapTicketType)
+        .filter((ticketType): ticketType is TicketType => Boolean(ticketType))
+        .filter((ticketType) => ticketType.isActive)
+        .sort((left, right) => left.priceCents - right.priceCents),
+      error: null,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Erro inesperado ao carregar o evento.";
+
+    console.log("EVENTO_SLUG:", slug);
+    console.log("ERRO_EVENTO:", message);
+
     return {
       event: null,
       ticketTypes: [],
-      error: "O evento foi encontrado, mas os campos obrigatórios estão incompletos no banco.",
+      error: message,
     };
   }
-
-  const { data: ticketRows, error: ticketError } = await reader.client
-    .from("ticket_types")
-    .select("*")
-    .eq("event_id", event.id);
-
-  const ticketTypes = ((ticketRows ?? []) as GenericRow[])
-    .map(mapTicketType)
-    .filter((ticketType): ticketType is TicketType => Boolean(ticketType))
-    .filter((ticketType) => ticketType.isActive)
-    .sort((left, right) => left.priceCents - right.priceCents);
-
-  console.info("[events] detail ticket types result", {
-    slug,
-    source: reader.source,
-    error: ticketError?.message ?? null,
-    count: ticketTypes.length,
-    rows: ticketRows ?? null,
-  });
-
-  if (ticketError) {
-    const message = `O evento foi carregado, mas os lotes não puderam ser lidos: ${ticketError.message}`;
-    console.error("[events] detail ticket types failed", {
-      slug,
-      source: reader.source,
-      error: ticketError.message,
-    });
-    return { event, ticketTypes: [], error: message };
-  }
-
-  return { event, ticketTypes, error: null };
 }

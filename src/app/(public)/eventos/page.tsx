@@ -14,6 +14,9 @@ export default async function EventosPage() {
       <p className="mt-2 text-sm text-muted-foreground sm:text-base">
         Encontre eventos, filtre por estado/cidade e compre ingressos com Pix.
       </p>
+      <p className="mt-2 text-xs font-semibold uppercase tracking-[0.24em] text-gold/80">
+        Quantidade de eventos: {events.length}
+      </p>
       <div className="mt-8">
         <EventsExplorer events={events} errorMessage={error} />
       </div>
