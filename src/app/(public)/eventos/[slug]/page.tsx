@@ -11,7 +11,20 @@ export default async function EventoDetalhePage({
 }) {
   const { slug } = await params;
   const normalizedSlug = slug.trim();
-  const { event, ticketTypes } = await getEventBySlug(normalizedSlug);
+  const { event, ticketTypes, error } = await getEventBySlug(normalizedSlug);
+
+  if (error && !event) {
+    return (
+      <div className="container py-10">
+        <EmptyState
+          title="Falha ao carregar evento"
+          description={error}
+          actionLabel="Ver eventos"
+          actionHref="/eventos"
+        />
+      </div>
+    );
+  }
 
   if (!normalizedSlug || !event) {
     return (
@@ -62,6 +75,11 @@ export default async function EventoDetalhePage({
         </div>
 
         <div className="lg:sticky lg:top-24 lg:self-start">
+          {error ? (
+            <div className="mb-4 rounded-2xl border border-amber-400/30 bg-amber-500/10 p-4 text-sm text-amber-100">
+              {error}
+            </div>
+          ) : null}
           <TicketCheckoutClient eventId={event.id} ticketTypes={ticketTypes} />
         </div>
       </div>

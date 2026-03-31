@@ -6,7 +6,7 @@ export const metadata = {
 };
 
 export default async function EventosPage() {
-  const events = await listPublicEvents();
+  const { events, error } = await listPublicEvents();
 
   return (
     <div className="container py-10">
@@ -15,9 +15,8 @@ export default async function EventosPage() {
         Encontre eventos, filtre por estado/cidade e compre ingressos com Pix.
       </p>
       <div className="mt-8">
-        <EventsExplorer events={events} />
+        <EventsExplorer events={events} errorMessage={error} />
       </div>
     </div>
   );
 }
-

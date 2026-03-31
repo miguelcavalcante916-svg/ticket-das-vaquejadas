@@ -16,7 +16,13 @@ function normalize(text: string) {
     .toLowerCase();
 }
 
-export function EventsExplorer({ events }: { events: EventWithPrice[] }) {
+export function EventsExplorer({
+  events,
+  errorMessage,
+}: {
+  events: EventWithPrice[];
+  errorMessage?: string | null;
+}) {
   const [filters, setFilters] = React.useState<EventFiltersValue>({
     query: "",
     state: "all",
@@ -39,8 +45,13 @@ export function EventsExplorer({ events }: { events: EventWithPrice[] }) {
 
   return (
     <div className="space-y-6">
-      <EventFilters value={filters} onChange={setFilters} />
-      {filtered.length > 0 ? (
+      {events.length > 0 ? <EventFilters value={filters} onChange={setFilters} /> : null}
+      {errorMessage && events.length === 0 ? (
+        <EmptyState
+          title="Falha ao carregar eventos"
+          description={errorMessage}
+        />
+      ) : filtered.length > 0 ? (
         <EventGrid events={filtered} />
       ) : (
         <EmptyState

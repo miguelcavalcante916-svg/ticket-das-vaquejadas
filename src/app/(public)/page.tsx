@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { listPublicEvents } from "@/services/events";
 
 export default async function HomePage() {
-  const events = await listPublicEvents();
+  const { events, error } = await listPublicEvents();
 
   return (
     <div>
@@ -99,7 +99,7 @@ export default async function HomePage() {
           </div>
         </div>
         <div className="mt-8">
-          <EventsExplorer events={events} />
+          <EventsExplorer events={events} errorMessage={error} />
         </div>
       </section>
 
@@ -143,4 +143,3 @@ export default async function HomePage() {
     </div>
   );
 }
-

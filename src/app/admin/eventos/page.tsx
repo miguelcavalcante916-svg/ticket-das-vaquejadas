@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CalendarDays, Pencil, Ticket, Users } from "lucide-react";
 
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,7 +13,7 @@ export const metadata = {
 };
 
 export default async function AdminEventosPage() {
-  const events = await listPublicEvents();
+  const { events, error } = await listPublicEvents();
 
   return (
     <div className="space-y-6">
@@ -27,6 +28,13 @@ export default async function AdminEventosPage() {
           <Link href="/admin/eventos/novo">Novo evento</Link>
         </Button>
       </div>
+
+      {error && !events.length ? (
+        <EmptyState
+          title="Falha ao carregar eventos"
+          description={error}
+        />
+      ) : null}
 
       <div className="grid gap-4">
         {events.map((e) => (
@@ -76,4 +84,3 @@ export default async function AdminEventosPage() {
     </div>
   );
 }
-
