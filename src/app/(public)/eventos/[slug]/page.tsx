@@ -1,6 +1,5 @@
-import { notFound } from "next/navigation";
-
 import { EventBanner } from "@/components/events/event-banner";
+import { EmptyState } from "@/components/empty-state";
 import { TicketCheckoutClient } from "@/components/tickets/ticket-checkout-client";
 import { Card, CardContent } from "@/components/ui/card";
 import { getEventBySlug } from "@/services/events";
@@ -11,8 +10,21 @@ export default async function EventoDetalhePage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const { event, ticketTypes } = await getEventBySlug(slug);
-  if (!event) notFound();
+  const normalizedSlug = slug.trim();
+  const { event, ticketTypes } = await getEventBySlug(normalizedSlug);
+
+  if (!normalizedSlug || !event) {
+    return (
+      <div className="container py-10">
+        <EmptyState
+          title="Evento não encontrado"
+          description="Não localizamos esse evento no banco de dados. Verifique o link ou escolha outro evento disponível."
+          actionLabel="Ver eventos"
+          actionHref="/eventos"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="container py-10">
@@ -23,9 +35,7 @@ export default async function EventoDetalhePage({
           <Card className="border-border/60">
             <CardContent className="pt-6">
               <h2 className="text-lg font-extrabold">Sobre o evento</h2>
-              <p className="mt-3 text-sm text-muted-foreground">
-                {event.description}
-              </p>
+              <p className="mt-3 text-sm text-muted-foreground">{event.description}</p>
             </CardContent>
           </Card>
 
@@ -58,4 +68,3 @@ export default async function EventoDetalhePage({
     </div>
   );
 }
-

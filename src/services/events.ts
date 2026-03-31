@@ -1,6 +1,5 @@
 import type { Event, TicketType } from "@/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { MOCK_EVENTS, mockEventBySlug, mockTicketTypesForEvent } from "@/services/mock-data";
 
 type EventWithPrice = Event & { startingPriceCents?: number | null };
 
@@ -78,12 +77,7 @@ function mapTicketType(row: TicketTypeRow): TicketType {
 
 export async function listPublicEvents(): Promise<EventWithPrice[]> {
   if (!hasSupabaseEnv()) {
-    return MOCK_EVENTS.map((event) => {
-      const ticketTypes = mockTicketTypesForEvent(event.id).filter((ticket) => ticket.isActive);
-      const startingPriceCents =
-        ticketTypes.length > 0 ? Math.min(...ticketTypes.map((ticket) => ticket.priceCents)) : null;
-      return { ...event, startingPriceCents };
-    });
+    return [];
   }
 
   const supabase = await createSupabaseServerClient();
@@ -98,12 +92,16 @@ export async function listPublicEvents(): Promise<EventWithPrice[]> {
     .limit(60);
 
   if (error || !data) {
-    return MOCK_EVENTS.map((event) => ({ ...event, startingPriceCents: null }));
+    return [];
   }
 
   const rows = data as EventRow[];
   const events = rows.map(mapEvent);
   const eventIds = events.map((event) => event.id);
+
+  if (!eventIds.length) {
+    return [];
+  }
 
   const { data: typesData } = await supabase
     .from("ticket_types")
@@ -131,9 +129,7 @@ export async function getEventBySlug(slug: string): Promise<{
   ticketTypes: TicketType[];
 }> {
   if (!hasSupabaseEnv()) {
-    const event = mockEventBySlug(slug);
-    if (!event) return { event: null, ticketTypes: [] };
-    return { event, ticketTypes: mockTicketTypesForEvent(event.id) };
+    return { event: null, ticketTypes: [] };
   }
 
   const supabase = await createSupabaseServerClient();
@@ -145,7 +141,10 @@ export async function getEventBySlug(slug: string): Promise<{
     .eq("slug", slug)
     .maybeSingle();
 
-  if (eventError || !eventRow) return { event: null, ticketTypes: [] };
+  if (eventError || !eventRow) {
+    return { event: null, ticketTypes: [] };
+  }
+
   const event = mapEvent(eventRow);
 
   const { data: typeRows } = await supabase
@@ -156,5 +155,8 @@ export async function getEventBySlug(slug: string): Promise<{
     .eq("event_id", event.id)
     .order("price_cents", { ascending: true });
 
-  return { event, ticketTypes: ((typeRows ?? []) as TicketTypeRow[]).map(mapTicketType) };
+  return {
+    event,
+    ticketTypes: ((typeRows ?? []) as TicketTypeRow[]).map(mapTicketType),
+  };
 }
