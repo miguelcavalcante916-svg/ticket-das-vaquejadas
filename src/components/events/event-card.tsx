@@ -6,7 +6,6 @@ import type { Event } from "@/types";
 import { formatDateBR } from "@/lib/utils/date";
 import { formatBRLFromCents } from "@/lib/utils/currency";
 import { isRemoteImageSrc } from "@/lib/utils/image";
-import { EventCardBuyButton } from "@/components/events/event-card-buy-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
@@ -14,11 +13,9 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 export function EventCard({
   event,
   startingPriceCents,
-  defaultTicketTypeId,
 }: {
   event: Event;
   startingPriceCents?: number | null;
-  defaultTicketTypeId?: string | null;
 }) {
   const coverImage = event.coverImageUrl ?? null;
   const unoptimized = isRemoteImageSrc(coverImage);
@@ -74,15 +71,13 @@ export function EventCard({
         </div>
       </CardContent>
 
-      <CardFooter className="items-start gap-2">
+      <CardFooter className="gap-2">
         <Button asChild variant="outline" className="w-full">
           <Link href={`/eventos/${event.slug}`}>Ver detalhes</Link>
         </Button>
-        <EventCardBuyButton
-          eventId={event.id}
-          ticketTypeId={defaultTicketTypeId}
-          eventSlug={event.slug}
-        />
+        <Button asChild variant="gold" className="w-full">
+          <Link href={`/eventos/${event.slug}#ingressos`}>Comprar</Link>
+        </Button>
       </CardFooter>
     </Card>
   );

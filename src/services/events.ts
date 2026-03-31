@@ -2,10 +2,7 @@ import type { Event, TicketType } from "@/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { MOCK_EVENTS, mockEventBySlug, mockTicketTypesForEvent } from "@/services/mock-data";
 
-type EventWithCheckout = Event & {
-  startingPriceCents?: number | null;
-  defaultTicketTypeId?: string | null;
-};
+type EventWithPrice = Event & { startingPriceCents?: number | null };
 
 type EventRow = {
   id: string;
@@ -35,12 +32,9 @@ type TicketTypeRow = {
   is_active: boolean;
 };
 
-type TicketTypeSummaryRow = {
-  id: string;
+type TicketTypeMinPriceRow = {
   event_id: string;
   price_cents: number;
-  quantity_total: number;
-  quantity_sold?: number | null;
   is_active: boolean;
 };
 
@@ -82,32 +76,13 @@ function mapTicketType(row: TicketTypeRow): TicketType {
   };
 }
 
-function getDefaultTicketTypeId(ticketTypes: Array<{
-  id: string;
-  priceCents: number;
-  quantityTotal: number;
-  quantitySold: number;
-  isActive: boolean;
-}>) {
-  const saleable = ticketTypes
-    .filter((ticket) => ticket.isActive && ticket.quantityTotal - ticket.quantitySold > 0)
-    .sort((left, right) => left.priceCents - right.priceCents);
-
-  return saleable[0]?.id ?? null;
-}
-
-export async function listPublicEvents(): Promise<EventWithCheckout[]> {
+export async function listPublicEvents(): Promise<EventWithPrice[]> {
   if (!hasSupabaseEnv()) {
     return MOCK_EVENTS.map((event) => {
       const ticketTypes = mockTicketTypesForEvent(event.id).filter((ticket) => ticket.isActive);
       const startingPriceCents =
         ticketTypes.length > 0 ? Math.min(...ticketTypes.map((ticket) => ticket.priceCents)) : null;
-
-      return {
-        ...event,
-        startingPriceCents,
-        defaultTicketTypeId: getDefaultTicketTypeId(ticketTypes),
-      };
+      return { ...event, startingPriceCents };
     });
   }
 
@@ -123,11 +98,7 @@ export async function listPublicEvents(): Promise<EventWithCheckout[]> {
     .limit(60);
 
   if (error || !data) {
-    return MOCK_EVENTS.map((event) => ({
-      ...event,
-      startingPriceCents: null,
-      defaultTicketTypeId: getDefaultTicketTypeId(mockTicketTypesForEvent(event.id)),
-    }));
+    return MOCK_EVENTS.map((event) => ({ ...event, startingPriceCents: null }));
   }
 
   const rows = data as EventRow[];
@@ -136,36 +107,23 @@ export async function listPublicEvents(): Promise<EventWithCheckout[]> {
 
   const { data: typesData } = await supabase
     .from("ticket_types")
-    .select("id,event_id,price_cents,quantity_total,quantity_sold,is_active")
+    .select("event_id,price_cents,is_active")
     .in("event_id", eventIds)
     .eq("is_active", true);
 
-  const ticketTypesByEvent = new Map<string, TicketTypeSummaryRow[]>();
-
-  for (const ticketType of (typesData ?? []) as TicketTypeSummaryRow[]) {
-    const list = ticketTypesByEvent.get(ticketType.event_id) ?? [];
-    list.push(ticketType);
-    ticketTypesByEvent.set(ticketType.event_id, list);
+  const minPriceByEvent = new Map<string, number>();
+  for (const ticketType of (typesData ?? []) as TicketTypeMinPriceRow[]) {
+    const previous = minPriceByEvent.get(ticketType.event_id);
+    const next = ticketType.price_cents;
+    if (typeof previous !== "number" || next < previous) {
+      minPriceByEvent.set(ticketType.event_id, next);
+    }
   }
 
-  return events.map((event) => {
-    const ticketTypes = ticketTypesByEvent.get(event.id) ?? [];
-    const saleable = ticketTypes.filter(
-      (ticketType) =>
-        ticketType.is_active &&
-        ticketType.quantity_total - (ticketType.quantity_sold ?? 0) > 0,
-    );
-
-    return {
-      ...event,
-      startingPriceCents:
-        saleable.length > 0
-          ? Math.min(...saleable.map((ticketType) => ticketType.price_cents))
-          : null,
-      defaultTicketTypeId:
-        saleable.sort((left, right) => left.price_cents - right.price_cents)[0]?.id ?? null,
-    };
-  });
+  return events.map((event) => ({
+    ...event,
+    startingPriceCents: minPriceByEvent.get(event.id) ?? null,
+  }));
 }
 
 export async function getEventBySlug(slug: string): Promise<{

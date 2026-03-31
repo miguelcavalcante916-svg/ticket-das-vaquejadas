@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
         buyer_email: resolvedBuyerEmail,
         buyer_document: buyerDocument ?? null,
       })
-      .select("id")
+      .select("id,event_id,status,total_cents")
       .single();
 
     if (orderError || !orderRow) {
@@ -249,13 +249,13 @@ export async function POST(request: NextRequest) {
 
     const orderId = orderRow.id as string;
     console.info("[orders] order created", {
-      orderId,
-      eventId,
+      order: orderRow,
     });
 
-    const { error: itemsError } = await supabase
+    const { data: insertedItems, error: itemsError } = await supabase
       .from("order_items")
-      .insert(orderItemsToInsert.map((item) => ({ ...item, order_id: orderId })));
+      .insert(orderItemsToInsert.map((item) => ({ ...item, order_id: orderId })))
+      .select("id,order_id,ticket_type_id,quantity,total_cents");
 
     if (itemsError) {
       throw new Error(itemsError?.message ?? "Falha ao criar itens do pedido.");
@@ -263,10 +263,7 @@ export async function POST(request: NextRequest) {
 
     console.info("[orders] order items created", {
       orderId,
-      items: orderItemsToInsert.map((item) => ({
-        ticketTypeId: item.ticket_type_id,
-        quantity: item.quantity,
-      })),
+      orderItems: insertedItems ?? [],
     });
 
     return NextResponse.json({ orderId }, { status: 201 });

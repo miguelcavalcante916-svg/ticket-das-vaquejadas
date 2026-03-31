@@ -7,10 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { EventFilters, type EventFiltersValue } from "@/components/events/event-filters";
 import { EventGrid } from "@/components/events/event-grid";
 
-type EventWithCheckout = Event & {
-  startingPriceCents?: number | null;
-  defaultTicketTypeId?: string | null;
-};
+type EventWithPrice = Event & { startingPriceCents?: number | null };
 
 function normalize(text: string) {
   return text
@@ -19,7 +16,7 @@ function normalize(text: string) {
     .toLowerCase();
 }
 
-export function EventsExplorer({ events }: { events: EventWithCheckout[] }) {
+export function EventsExplorer({ events }: { events: EventWithPrice[] }) {
   const [filters, setFilters] = React.useState<EventFiltersValue>({
     query: "",
     state: "all",
