@@ -1,15 +1,11 @@
-import { createClient } from "@supabase/supabase-js";
-
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { hasPublicSupabaseEnv } from "@/lib/env/public";
+import { hasServiceSupabaseEnv } from "@/lib/env/server";
+import { getOrganizerIdForUser } from "@/lib/supabase/access";
+import { createSupabaseServerClient, createSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { formatBRLFromCents } from "@/lib/utils/currency";
 import { formatDateTimeBR } from "@/lib/utils/date";
-
-function hasServiceEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-}
 
 export default async function AdminPedidosPage() {
   type OrderRow = {
@@ -23,17 +19,41 @@ export default async function AdminPedidosPage() {
 
   let rows: OrderRow[] = [];
 
-  if (hasServiceEnv()) {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    );
-    const { data } = await supabase
+  if (hasServiceSupabaseEnv() && hasPublicSupabaseEnv()) {
+    const authSupabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await authSupabase.auth.getUser();
+
+    const { data: profile } = await authSupabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user?.id ?? "")
+      .maybeSingle();
+
+    const role = (profile?.role as string | undefined) ?? "user";
+    const supabase = createSupabaseServiceRoleClient();
+    const query = supabase
       .from("orders")
-      .select("id,status,total_cents,currency,buyer_name,buyer_email,created_at")
+      .select("id,event_id,status,total_cents,currency,buyer_name,buyer_email,created_at")
       .order("created_at", { ascending: false })
       .limit(50);
-    rows = data ?? [];
+
+    if (role === "organizer" && user?.id) {
+      const organizerId = await getOrganizerIdForUser(supabase, user.id);
+      if (organizerId) {
+        const { data: events } = await supabase
+          .from("events")
+          .select("id")
+          .eq("organizer_id", organizerId)
+          .limit(200);
+
+        const eventIds = (events ?? []).map((event) => event.id);
+        rows = eventIds.length ? ((await query.in("event_id", eventIds)).data ?? []) : [];
+      }
+    } else {
+      rows = (await query).data ?? [];
+    }
   } else {
     rows = [
       {

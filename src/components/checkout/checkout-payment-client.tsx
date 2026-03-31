@@ -15,6 +15,15 @@ type ApiPayment = {
   copyPaste?: string | null;
 };
 
+type CreatePaymentResponse = {
+  payment?: ApiPayment;
+  payment_id?: string | null;
+  status?: string;
+  qr_code?: string | null;
+  qr_code_base64?: string | null;
+  message?: string;
+};
+
 export function CheckoutPaymentClient({
   orderId,
   initialPayment,
@@ -37,21 +46,31 @@ export function CheckoutPaymentClient({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ orderId }),
       });
-      const data = (await res.json()) as {
-        payment?: ApiPayment;
-        message?: string;
-      };
-      if (!res.ok || !data.payment) {
+      const data = (await res.json()) as CreatePaymentResponse;
+      const paymentData = data.payment
+        ? data.payment
+        : data.payment_id || data.qr_code || data.qr_code_base64
+          ? {
+              providerPaymentId: data.payment_id ?? null,
+              status: data.status ?? "pending",
+              qrCode: data.qr_code ?? null,
+              qrCodeBase64: data.qr_code_base64 ?? null,
+              copyPaste: data.qr_code ?? null,
+            }
+          : null;
+
+      if (!res.ok || !paymentData) {
         setError(data.message ?? "Falha ao gerar Pix.");
         return;
       }
+
       setPayment({
         provider: "mercado_pago",
-        providerPaymentId: data.payment.providerPaymentId ?? null,
-        status: data.payment.status ?? "pending",
-        qrCode: data.payment.qrCode ?? null,
-        qrCodeBase64: data.payment.qrCodeBase64 ?? null,
-        copyPaste: data.payment.copyPaste ?? null,
+        providerPaymentId: paymentData.providerPaymentId ?? null,
+        status: paymentData.status ?? "pending",
+        qrCode: paymentData.qrCode ?? null,
+        qrCodeBase64: paymentData.qrCodeBase64 ?? null,
+        copyPaste: paymentData.copyPaste ?? paymentData.qrCode ?? null,
       });
     } finally {
       setLoading(false);

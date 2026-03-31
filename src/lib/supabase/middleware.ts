@@ -1,18 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { requirePublicSupabaseEnv } from "@/lib/env/public";
+
 export function createSupabaseMiddlewareClient(
   request: NextRequest,
   response: NextResponse,
 ) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !anonKey) {
-    throw new Error(
-      "Supabase env ausente. Defina NEXT_PUBLIC_SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY.",
-    );
-  }
+  const { url, anonKey } = requirePublicSupabaseEnv();
 
   return createServerClient(url, anonKey, {
     cookies: {
@@ -27,4 +22,3 @@ export function createSupabaseMiddlewareClient(
     },
   });
 }
-

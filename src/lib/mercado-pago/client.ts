@@ -1,14 +1,14 @@
+import "server-only";
+
 import { MercadoPagoConfig, Payment } from "mercadopago";
 
+import { requireMercadoPagoAccessToken } from "@/lib/env/server";
+
 export function createMercadoPagoConfig() {
-  const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
-  if (!accessToken) {
-    throw new Error("Env ausente: MERCADO_PAGO_ACCESS_TOKEN");
-  }
+  const accessToken = requireMercadoPagoAccessToken();
   return new MercadoPagoConfig({ accessToken });
 }
 
 export function createPaymentClient() {
   return new Payment(createMercadoPagoConfig());
 }
-

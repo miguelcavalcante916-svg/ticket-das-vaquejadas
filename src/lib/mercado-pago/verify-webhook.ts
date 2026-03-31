@@ -1,3 +1,5 @@
+import "server-only";
+
 import crypto from "crypto";
 
 function timingSafeEqual(a: string, b: string) {
@@ -23,21 +25,40 @@ function parseSignature(header: string) {
 }
 
 export function verifyMercadoPagoWebhookSignature({
-  rawBody,
   signatureHeader,
   secret,
+  rawBody,
+  dataId,
+  requestId,
 }: {
-  rawBody: string;
   signatureHeader: string | null;
   secret: string | undefined;
+  rawBody: string;
+  dataId?: string | null;
+  requestId?: string | null;
 }) {
-  if (!secret) return true;
+  if (!secret) return false;
   if (!signatureHeader) return false;
 
   const parsed = parseSignature(signatureHeader);
-  const expected = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
-
   const provided = parsed.v1 ?? signatureHeader;
-  return timingSafeEqual(provided, expected);
-}
+  if (!provided) return false;
 
+  const normalizedId = dataId?.trim().toLowerCase() ?? null;
+  const normalizedRequestId = requestId?.trim() ?? null;
+
+  if (parsed.ts && normalizedId && normalizedRequestId) {
+    const manifest = `id:${normalizedId};request-id:${normalizedRequestId};ts:${parsed.ts};`;
+    const expectedManifest = crypto
+      .createHmac("sha256", secret)
+      .update(manifest)
+      .digest("hex");
+
+    if (timingSafeEqual(provided, expectedManifest)) {
+      return true;
+    }
+  }
+
+  const expectedRawBody = crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  return timingSafeEqual(provided, expectedRawBody);
+}

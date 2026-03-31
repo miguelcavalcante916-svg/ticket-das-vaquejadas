@@ -2,35 +2,38 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { apiError, apiValidationError } from "@/lib/api/http";
+import { hasPublicSupabaseEnv, requirePublicSupabaseEnv } from "@/lib/env/public";
+import { hasServiceSupabaseEnv } from "@/lib/env/server";
 import { getApiUserRole, isOrganizerOrAdmin } from "@/lib/supabase/api-auth";
+import { getOrganizerIdForUser } from "@/lib/supabase/access";
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { MOCK_EVENTS } from "@/services/mock-data";
 
+export const runtime = "nodejs";
+
+const httpUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
+    message: "Use uma URL http(s) válida.",
+  });
+
 const createEventSchema = z.object({
-  title: z.string().min(3),
-  slug: z.string().min(3),
-  description: z.string().min(10),
-  startDate: z.string().min(4),
+  title: z.string().trim().min(3),
+  slug: z.string().trim().min(3),
+  description: z.string().trim().min(10),
+  startDate: z.string().trim().min(4),
   endDate: z.string().optional().nullable(),
-  city: z.string().min(2),
-  state: z.string().length(2),
-  venueName: z.string().optional().nullable(),
-  address: z.string().optional().nullable(),
-  coverImageUrl: z.string().url().optional().nullable().or(z.literal("")),
+  city: z.string().trim().min(2),
+  state: z.string().trim().length(2).transform((value) => value.toUpperCase()),
+  venueName: z.string().trim().optional().nullable(),
+  address: z.string().trim().optional().nullable(),
+  coverImageUrl: z.union([httpUrlSchema, z.literal("")]).optional().nullable(),
   featured: z.boolean().optional(),
   status: z.enum(["draft", "published", "ended"]).optional(),
 });
-
-function hasAnonEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  );
-}
-
-function hasServiceEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-}
 
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
@@ -38,14 +41,12 @@ export async function GET(request: NextRequest) {
   const state = url.searchParams.get("state")?.trim() ?? "";
   const city = url.searchParams.get("city")?.trim() ?? "";
 
-  if (!hasAnonEnv()) {
+  if (!hasPublicSupabaseEnv()) {
     return NextResponse.json({ events: MOCK_EVENTS });
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  );
+  const publicEnv = requirePublicSupabaseEnv();
+  const supabase = createClient(publicEnv.url, publicEnv.anonKey);
 
   let query = supabase
     .from("events")
@@ -62,60 +63,54 @@ export async function GET(request: NextRequest) {
 
   const { data, error } = await query;
   if (error) {
-    return NextResponse.json({ events: [] }, { status: 500 });
+    return apiError(500, "Falha ao carregar eventos.", { events: [] });
   }
 
   return NextResponse.json({ events: data ?? [] });
 }
 
 export async function POST(request: NextRequest) {
-  if (!hasServiceEnv()) {
-    return NextResponse.json(
-      { message: "Configure SUPABASE_SERVICE_ROLE_KEY para criar eventos." },
-      { status: 500 },
+  if (!hasServiceSupabaseEnv()) {
+    return apiError(
+      500,
+      "Configure NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY para criar eventos.",
     );
   }
 
   const auth = await getApiUserRole(request);
   if (!auth || !isOrganizerOrAdmin(auth.role)) {
-    return NextResponse.json({ message: "Não autorizado" }, { status: 401 });
+    return apiError(401, "Não autorizado.");
   }
 
   const body = await request.json().catch(() => null);
   const parsed = createEventSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ errors: parsed.error.flatten() }, { status: 400 });
+    return apiValidationError(parsed.error);
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
+  const supabase = createSupabaseServiceRoleClient();
+  let organizerId = await getOrganizerIdForUser(supabase, auth.userId);
+  if (!organizerId) {
+    const { data: organizerCreated, error: organizerError } = await supabase
+      .from("organizers")
+      .insert({
+        user_id: auth.userId,
+        name: auth.email ? auth.email.split("@")[0] : "Organizador",
+      })
+      .select("id")
+      .single();
 
-  const { data: organizerExisting } = await supabase
-    .from("organizers")
-    .select("id")
-    .eq("user_id", auth.userId)
-    .maybeSingle();
-
-  const organizerId =
-    organizerExisting?.id ??
-    (
-      await supabase
-        .from("organizers")
-        .insert({
-          user_id: auth.userId,
-          name: auth.email ? auth.email.split("@")[0] : "Organizador",
-        })
-        .select("id")
-        .single()
-    ).data?.id;
+    if (organizerError || !organizerCreated?.id) {
+      return apiError(
+        500,
+        organizerError?.message ?? "Falha ao criar organizador para o usuário autenticado.",
+      );
+    }
+    organizerId = organizerCreated.id;
+  }
 
   if (!organizerId) {
-    return NextResponse.json(
-      { message: "Falha ao resolver organizador." },
-      { status: 500 },
-    );
+    return apiError(500, "Falha ao resolver organizador.");
   }
 
   const values = parsed.data;
@@ -140,7 +135,7 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ message: error.message }, { status: 500 });
+    return apiError(500, error.message);
   }
 
   return NextResponse.json({ event: data }, { status: 201 });

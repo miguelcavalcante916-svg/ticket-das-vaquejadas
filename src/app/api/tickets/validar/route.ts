@@ -1,39 +1,48 @@
-import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { NextResponse, type NextRequest } from "next/server";
 
-const schema = z.object({
-  code: z.string().min(3),
-  eventId: z.string().min(1),
-});
+import { apiError, apiValidationError } from "@/lib/api/http";
+import { hasServiceSupabaseEnv } from "@/lib/env/server";
+import { getApiUserRole, isOrganizerOrAdmin } from "@/lib/supabase/api-auth";
+import { canManageEvent } from "@/lib/supabase/access";
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
 
-function hasServiceEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-}
+export const runtime = "nodejs";
+
+const schema = z.object({
+  code: z.string().trim().min(3),
+  eventId: z.string().trim().min(1),
+});
 
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ message: "Dados inválidos" }, { status: 400 });
+    return apiValidationError(parsed.error);
   }
 
   const { code, eventId } = parsed.data;
 
-  if (!hasServiceEnv()) {
-    const ok = code.startsWith("TVQ-");
+  if (!hasServiceSupabaseEnv()) {
+    const valid = code.startsWith("TVQ-");
     return NextResponse.json({
-      status: ok ? "valid" : "invalid",
-      message: ok ? "Ingresso válido (modo demo)." : "Ingresso inválido (modo demo).",
+      status: valid ? "valid" : "invalid",
+      message: valid ? "Ingresso valido (modo demo)." : "Ingresso invalido (modo demo).",
     });
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
+  const auth = await getApiUserRole(request);
+  if (!auth || !isOrganizerOrAdmin(auth.role)) {
+    return apiError(401, "Nao autorizado.");
+  }
+
+  const supabase = createSupabaseServiceRoleClient();
+  if (
+    auth.role === "organizer" &&
+    !(await canManageEvent(supabase, "organizer", auth.userId, eventId))
+  ) {
+    return apiError(403, "Sem acesso a este evento.");
+  }
 
   const { data: ticket, error } = await supabase
     .from("tickets")
@@ -44,9 +53,23 @@ export async function POST(request: NextRequest) {
 
   if (error || !ticket) {
     return NextResponse.json(
-      { status: "invalid", message: "Ingresso não encontrado." },
+      { status: "invalid", message: "Ingresso nao encontrado." },
       { status: 200 },
     );
+  }
+
+  if (ticket.status === "used" || ticket.checked_in_at) {
+    return NextResponse.json({
+      status: "used",
+      message: "Ingresso ja validado.",
+    });
+  }
+
+  if (ticket.status !== "active") {
+    return NextResponse.json({
+      status: "invalid",
+      message: "Ingresso indisponivel para check-in.",
+    });
   }
 
   const { data: checkin } = await supabase
@@ -58,26 +81,33 @@ export async function POST(request: NextRequest) {
   if (checkin) {
     return NextResponse.json({
       status: "used",
-      message: "Ingresso já validado.",
+      message: "Ingresso ja validado.",
     });
   }
 
+  const now = new Date().toISOString();
   const { error: insertError } = await supabase.from("checkins").insert({
     ticket_id: ticket.id,
     event_id: eventId,
-    checked_in_at: new Date().toISOString(),
+    checked_in_by: auth.userId,
+    checked_in_at: now,
   });
 
   if (insertError) {
-    return NextResponse.json(
-      { status: "error", message: insertError.message },
-      { status: 500 },
-    );
+    const duplicateError = (insertError as { code?: string }).code === "23505";
+    if (duplicateError) {
+      return NextResponse.json({
+        status: "used",
+        message: "Ingresso ja validado.",
+      });
+    }
+
+    return apiError(500, insertError.message);
   }
 
   await supabase
     .from("tickets")
-    .update({ status: "used", checked_in_at: new Date().toISOString() })
+    .update({ status: "used", checked_in_at: now })
     .eq("id", ticket.id);
 
   return NextResponse.json({
@@ -85,4 +115,3 @@ export async function POST(request: NextRequest) {
     message: "Check-in realizado com sucesso.",
   });
 }
-

@@ -1,10 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import type { NextRequest } from "next/server";
 
+import { hasPublicSupabaseEnv, requirePublicSupabaseEnv } from "@/lib/env/public";
+
 export async function getApiUserRole(request: NextRequest) {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return null;
+  if (!hasPublicSupabaseEnv()) return null;
+  const { url, anonKey } = requirePublicSupabaseEnv();
 
   const supabase = createServerClient(url, anonKey, {
     cookies: {
@@ -39,4 +40,3 @@ export async function getApiUserRole(request: NextRequest) {
 export function isOrganizerOrAdmin(role: string | undefined) {
   return role === "organizer" || role === "admin";
 }
-

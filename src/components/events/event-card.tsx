@@ -5,6 +5,7 @@ import { CalendarDays, MapPin } from "lucide-react";
 import type { Event } from "@/types";
 import { formatDateBR } from "@/lib/utils/date";
 import { formatBRLFromCents } from "@/lib/utils/currency";
+import { isRemoteImageSrc } from "@/lib/utils/image";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
@@ -16,16 +17,20 @@ export function EventCard({
   event: Event;
   startingPriceCents?: number | null;
 }) {
+  const coverImage = event.coverImageUrl ?? null;
+  const unoptimized = isRemoteImageSrc(coverImage);
+
   return (
     <Card className="overflow-hidden">
       <div className="relative aspect-[16/9] w-full bg-gradient-to-br from-gold/15 via-black to-black">
-        {event.coverImageUrl ? (
+        {coverImage ? (
           <Image
-            src={event.coverImageUrl}
+            src={coverImage}
             alt={event.title}
             fill
             className="object-cover opacity-85"
             sizes="(max-width: 768px) 100vw, 33vw"
+            unoptimized={unoptimized}
           />
         ) : null}
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10" />
@@ -77,4 +82,3 @@ export function EventCard({
     </Card>
   );
 }
-

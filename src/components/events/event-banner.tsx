@@ -3,20 +3,25 @@ import { CalendarDays, MapPin } from "lucide-react";
 
 import type { Event } from "@/types";
 import { formatDateBR } from "@/lib/utils/date";
+import { isRemoteImageSrc } from "@/lib/utils/image";
 import { Badge } from "@/components/ui/badge";
 
 export function EventBanner({ event }: { event: Event }) {
+  const coverImage = event.coverImageUrl ?? null;
+  const unoptimized = isRemoteImageSrc(coverImage);
+
   return (
     <section className="relative overflow-hidden rounded-3xl border border-border/60 bg-card/70 shadow-glow">
       <div className="absolute inset-0">
-        {event.coverImageUrl ? (
+        {coverImage ? (
           <Image
-            src={event.coverImageUrl}
+            src={coverImage}
             alt={event.title}
             fill
             sizes="100vw"
             className="object-cover opacity-35"
             priority
+            unoptimized={unoptimized}
           />
         ) : null}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(200,155,60,0.25),transparent_50%),radial-gradient(circle_at_bottom,rgba(255,255,255,0.06),transparent_55%)]" />
@@ -54,4 +59,3 @@ export function EventBanner({ event }: { event: Event }) {
     </section>
   );
 }
-

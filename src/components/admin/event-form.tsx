@@ -64,7 +64,14 @@ const schema = z.object({
   state: z.enum(UFS),
   venueName: z.string().optional(),
   address: z.string().optional(),
-  coverImageUrl: z.string().url("URL inválida").optional().or(z.literal("")),
+  coverImageUrl: z
+    .string()
+    .url("URL inválida")
+    .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
+      message: "Use uma URL http(s) válida",
+    })
+    .optional()
+    .or(z.literal("")),
   status: z.enum(STATUSES),
 });
 

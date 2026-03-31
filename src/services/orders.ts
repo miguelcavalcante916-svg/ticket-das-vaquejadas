@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { Order, OrderItem, PixPaymentInfo } from "@/types";
 import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { qrDataUrl } from "@/lib/utils/qr";

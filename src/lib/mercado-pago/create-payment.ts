@@ -1,4 +1,8 @@
+import "server-only";
+
 import { createPaymentClient } from "@/lib/mercado-pago/client";
+import { normalizeMercadoPagoStatus } from "@/lib/mercado-pago/status";
+import { qrDataUrl } from "@/lib/utils/qr";
 
 export type CreatePixPaymentInput = {
   orderId: string;
@@ -36,16 +40,17 @@ export async function createPixPayment(
   });
 
   const qrCode = res.point_of_interaction?.transaction_data?.qr_code ?? null;
-  const qrCodeBase64 = res.point_of_interaction?.transaction_data?.qr_code_base64 ?? null;
+  const qrCodeBase64 =
+    res.point_of_interaction?.transaction_data?.qr_code_base64 ??
+    (qrCode ? await qrDataUrl(qrCode) : null);
 
   return {
     provider: "mercado_pago",
     providerPaymentId: String(res.id ?? ""),
-    status: res.status ?? "pending",
+    status: normalizeMercadoPagoStatus(res.status),
     qrCode,
     qrCodeBase64,
     copyPaste: qrCode,
     raw: res,
   };
 }
-

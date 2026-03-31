@@ -17,12 +17,18 @@ function normalizeBase64(base64: string) {
 export function PixBox({ payment }: { payment: PixPaymentInfo }) {
   const copyPaste = payment.copyPaste ?? "";
   const [copied, setCopied] = React.useState(false);
+  const [copyError, setCopyError] = React.useState<string | null>(null);
 
   const copy = async () => {
     if (!copyPaste) return;
-    await navigator.clipboard.writeText(copyPaste);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1400);
+    try {
+      setCopyError(null);
+      await navigator.clipboard.writeText(copyPaste);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      setCopyError("Nao foi possivel copiar automaticamente. Copie manualmente.");
+    }
   };
 
   return (
@@ -61,9 +67,11 @@ export function PixBox({ payment }: { payment: PixPaymentInfo }) {
               Código copiado.
             </p>
           ) : null}
+          {copyError ? (
+            <p className="text-xs font-semibold text-red-400">{copyError}</p>
+          ) : null}
         </div>
       </CardContent>
     </Card>
   );
 }
-

@@ -2,62 +2,46 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { apiError, apiValidationError } from "@/lib/api/http";
+import { hasPublicSupabaseEnv, requirePublicSupabaseEnv } from "@/lib/env/public";
+import { hasServiceSupabaseEnv } from "@/lib/env/server";
 import { getApiUserRole, isOrganizerOrAdmin } from "@/lib/supabase/api-auth";
+import { canManageEvent } from "@/lib/supabase/access";
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { mockTicketTypesForEvent } from "@/services/mock-data";
 
+export const runtime = "nodejs";
+
 const createSchema = z.object({
-  name: z.string().min(2),
-  description: z.string().optional().nullable(),
+  name: z.string().trim().min(2),
+  description: z.string().trim().optional().nullable(),
   priceCents: z.coerce.number().int().min(0),
   quantityTotal: z.coerce.number().int().min(1),
   isActive: z.boolean().default(true),
 });
-
-function hasAnonEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-  );
-}
-
-function hasServiceEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
-}
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  if (!hasAnonEnv()) {
+  if (!hasPublicSupabaseEnv()) {
     return NextResponse.json({ ticketTypes: mockTicketTypesForEvent(id) });
   }
 
   const auth = await getApiUserRole(request);
-  const canAdminRead = auth && isOrganizerOrAdmin(auth.role) && hasServiceEnv();
+  const canAdminRead = Boolean(auth && isOrganizerOrAdmin(auth.role) && hasServiceSupabaseEnv());
+  const publicEnv = requirePublicSupabaseEnv();
+  const supabase = canAdminRead
+    ? createSupabaseServiceRoleClient()
+    : createClient(publicEnv.url, publicEnv.anonKey);
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    canAdminRead ? process.env.SUPABASE_SERVICE_ROLE_KEY! : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  );
-
-  if (canAdminRead && auth.role === "organizer") {
-    const { data: organizer } = await supabase
-      .from("organizers")
-      .select("id")
-      .eq("user_id", auth.userId)
-      .maybeSingle();
-
-    const { data: event } = await supabase
-      .from("events")
-      .select("organizer_id")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (!organizer?.id || !event?.organizer_id || organizer.id !== event.organizer_id) {
-      return NextResponse.json({ ticketTypes: [] }, { status: 403 });
-    }
+  if (
+    auth?.role === "organizer" &&
+    canAdminRead &&
+    !(await canManageEvent(supabase, "organizer", auth.userId, id))
+  ) {
+    return apiError(403, "Sem acesso a este evento.", { ticketTypes: [] });
   }
 
   let query = supabase
@@ -69,7 +53,7 @@ export async function GET(
   if (!canAdminRead) query = query.eq("is_active", true);
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ message: error.message }, { status: 500 });
+  if (error) return apiError(500, error.message);
   return NextResponse.json({ ticketTypes: data ?? [] });
 }
 
@@ -79,45 +63,30 @@ export async function POST(
 ) {
   const { id } = await params;
 
-  if (!hasServiceEnv()) {
-    return NextResponse.json(
-      { message: "Configure SUPABASE_SERVICE_ROLE_KEY para criar lotes." },
-      { status: 500 },
+  if (!hasServiceSupabaseEnv()) {
+    return apiError(
+      500,
+      "Configure NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY para criar lotes.",
     );
   }
 
   const auth = await getApiUserRole(request);
   if (!auth || !isOrganizerOrAdmin(auth.role)) {
-    return NextResponse.json({ message: "Não autorizado" }, { status: 401 });
+    return apiError(401, "Nao autorizado.");
   }
 
   const body = await request.json().catch(() => null);
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ errors: parsed.error.flatten() }, { status: 400 });
+    return apiValidationError(parsed.error);
   }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  if (auth.role === "organizer") {
-    const { data: organizer } = await supabase
-      .from("organizers")
-      .select("id")
-      .eq("user_id", auth.userId)
-      .maybeSingle();
-
-    const { data: event } = await supabase
-      .from("events")
-      .select("organizer_id")
-      .eq("id", id)
-      .maybeSingle();
-
-    if (!organizer?.id || !event?.organizer_id || organizer.id !== event.organizer_id) {
-      return NextResponse.json({ message: "Sem acesso a este evento" }, { status: 403 });
-    }
+  const supabase = createSupabaseServiceRoleClient();
+  if (
+    auth.role === "organizer" &&
+    !(await canManageEvent(supabase, "organizer", auth.userId, id))
+  ) {
+    return apiError(403, "Sem acesso a este evento.");
   }
 
   const values = parsed.data;
@@ -134,6 +103,6 @@ export async function POST(
     .select("id")
     .single();
 
-  if (error) return NextResponse.json({ message: error.message }, { status: 500 });
+  if (error) return apiError(500, error.message);
   return NextResponse.json({ ticketType: data }, { status: 201 });
 }

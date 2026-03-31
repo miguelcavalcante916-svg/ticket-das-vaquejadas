@@ -1,8 +1,14 @@
 import crypto from "crypto";
-import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 import { z } from "zod";
 import { NextResponse, type NextRequest } from "next/server";
+
+import { apiError, apiValidationError } from "@/lib/api/http";
+import { hasPublicSupabaseEnv, requirePublicSupabaseEnv } from "@/lib/env/public";
+import { hasServiceSupabaseEnv } from "@/lib/env/server";
+import { getApiUserRole, isOrganizerOrAdmin } from "@/lib/supabase/api-auth";
+import { getOrganizerIdForUser } from "@/lib/supabase/access";
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/server";
 
 type TicketTypeRow = {
   id: string;
@@ -10,6 +16,8 @@ type TicketTypeRow = {
   name: string;
   price_cents: number;
   is_active: boolean;
+  quantity_total: number;
+  quantity_sold: number | null;
 };
 
 type OrderItemInsert = {
@@ -21,63 +29,75 @@ type OrderItemInsert = {
   total_cents: number;
 };
 
-type OrderItemRow = {
-  id: string;
-  ticket_type_id: string;
-  quantity: number;
-};
-
-type TicketInsert = {
-  order_id: string;
-  order_item_id: string;
-  event_id: string;
-  ticket_type_id: string;
-  user_id: string | null;
-  code: string;
-  qr_payload: string;
-  status: "active";
-};
-
 const createOrderSchema = z.object({
-  eventId: z.string().min(1),
+  eventId: z.string().trim().min(1),
   items: z
     .array(
       z.object({
-        ticketTypeId: z.string().min(1),
+        ticketTypeId: z.string().trim().min(1),
         quantity: z.coerce.number().int().min(1).max(20),
       }),
     )
     .min(1),
-  buyerName: z.string().optional(),
-  buyerEmail: z.string().email().optional(),
-  buyerDocument: z.string().optional(),
+  buyerName: z.string().trim().optional(),
+  buyerEmail: z.string().trim().email().optional(),
+  buyerDocument: z.string().trim().optional(),
 });
 
-function hasServiceEnv() {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
-  );
+export const runtime = "nodejs";
+
+async function rollbackStockReservations(
+  ticketTypeRows: Map<string, TicketTypeRow>,
+  reserved: Array<{ ticketTypeId: string; previousSold: number }>,
+) {
+  const supabase = createSupabaseServiceRoleClient();
+
+  for (const entry of reserved.reverse()) {
+    const row = ticketTypeRows.get(entry.ticketTypeId);
+    if (!row) continue;
+
+    await supabase
+      .from("ticket_types")
+      .update({ quantity_sold: entry.previousSold })
+      .eq("id", entry.ticketTypeId);
+
+    row.quantity_sold = entry.previousSold;
+  }
 }
 
-function ticketCode() {
-  return `TVQ-${crypto.randomBytes(6).toString("hex").toUpperCase()}`;
-}
+export async function GET(request: NextRequest) {
+  if (!hasServiceSupabaseEnv()) return NextResponse.json({ orders: [] });
 
-export async function GET() {
-  if (!hasServiceEnv()) return NextResponse.json({ orders: [] });
+  const auth = await getApiUserRole(request);
+  if (!auth || !isOrganizerOrAdmin(auth.role)) {
+    return apiError(401, "Nao autorizado.");
+  }
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
-  const { data, error } = await supabase
+  const supabase = createSupabaseServiceRoleClient();
+  let query = supabase
     .from("orders")
     .select("id,event_id,status,total_cents,currency,buyer_name,buyer_email,created_at")
     .order("created_at", { ascending: false })
     .limit(50);
 
-  if (error) return NextResponse.json({ message: error.message }, { status: 500 });
+  if (auth.role === "organizer") {
+    const organizerId = await getOrganizerIdForUser(supabase, auth.userId);
+    if (!organizerId) return NextResponse.json({ orders: [] });
+
+    const { data: events } = await supabase
+      .from("events")
+      .select("id")
+      .eq("organizer_id", organizerId)
+      .limit(200);
+
+    const eventIds = (events ?? []).map((event) => event.id);
+    if (!eventIds.length) return NextResponse.json({ orders: [] });
+
+    query = query.in("event_id", eventIds);
+  }
+
+  const { data, error } = await query;
+  if (error) return apiError(500, error.message);
   return NextResponse.json({ orders: data ?? [] });
 }
 
@@ -85,149 +105,152 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const parsed = createOrderSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ errors: parsed.error.flatten() }, { status: 400 });
+    return apiValidationError(parsed.error);
   }
 
-  if (!hasServiceEnv()) {
+  if (!hasServiceSupabaseEnv()) {
     return NextResponse.json({ orderId: crypto.randomUUID() }, { status: 201 });
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  let userId: string | null = null;
-
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-
+  const supabase = createSupabaseServiceRoleClient();
   const { eventId, items, buyerEmail, buyerName, buyerDocument } = parsed.data;
+
+  let userId: string | null = null;
   let resolvedBuyerEmail = buyerEmail ?? null;
 
-  if (url && anonKey) {
-    const auth = createServerClient(url, anonKey, {
+  if (hasPublicSupabaseEnv()) {
+    const publicEnv = requirePublicSupabaseEnv();
+    const auth = createServerClient(publicEnv.url, publicEnv.anonKey, {
       cookies: {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll() {
-          // No-op: somente leitura de sessão.
-        },
+        setAll() {},
       },
     });
+
     const {
       data: { user },
     } = await auth.auth.getUser();
+
     userId = user?.id ?? null;
     if (!resolvedBuyerEmail && user?.email) resolvedBuyerEmail = user.email;
   }
 
-  const ticketTypeIds = items.map((i) => i.ticketTypeId);
-
-  const { data: ticketTypes, error: ttError } = await supabase
-    .from("ticket_types")
-    .select("id,event_id,name,price_cents,is_active")
-    .in("id", ticketTypeIds);
-
-  if (ttError || !ticketTypes) {
-    return NextResponse.json(
-      { message: ttError?.message ?? "Falha ao carregar lotes" },
-      { status: 500 },
+  const requestedQuantities = new Map<string, number>();
+  for (const item of items) {
+    requestedQuantities.set(
+      item.ticketTypeId,
+      (requestedQuantities.get(item.ticketTypeId) ?? 0) + item.quantity,
     );
   }
 
-  const ticketTypeRows = (ticketTypes ?? []) as TicketTypeRow[];
-  const allowed = new Map(
-    ticketTypeRows
-      .filter((t) => t.event_id === eventId && t.is_active)
-      .map((t) => [t.id, t] as const),
+  const ticketTypeIds = [...requestedQuantities.keys()];
+  const { data: ticketTypes, error: ticketTypesError } = await supabase
+    .from("ticket_types")
+    .select("id,event_id,name,price_cents,is_active,quantity_total,quantity_sold")
+    .in("id", ticketTypeIds);
+
+  if (ticketTypesError || !ticketTypes) {
+    return apiError(
+      500,
+      ticketTypesError?.message ?? "Falha ao carregar os lotes do pedido.",
+    );
+  }
+
+  const ticketTypeRows = new Map(
+    (ticketTypes as TicketTypeRow[]).map((ticketType) => [ticketType.id, ticketType]),
   );
 
   let totalCents = 0;
   const orderItemsToInsert: OrderItemInsert[] = [];
-  for (const i of items) {
-    const tt = allowed.get(i.ticketTypeId);
-    if (!tt) {
-      return NextResponse.json(
-        { message: "Lote inválido ou inativo" },
-        { status: 400 },
-      );
+
+  for (const item of items) {
+    const ticketType = ticketTypeRows.get(item.ticketTypeId);
+    if (!ticketType || ticketType.event_id !== eventId || !ticketType.is_active) {
+      return apiError(400, "Lote invalido ou inativo.");
     }
-    const unit = tt.price_cents;
-    const line = unit * i.quantity;
-    totalCents += line;
+
+    const currentSold = ticketType.quantity_sold ?? 0;
+    const available = ticketType.quantity_total - currentSold;
+    if (item.quantity > available) {
+      return apiError(409, `Estoque insuficiente para o lote "${ticketType.name}".`);
+    }
+
+    const lineTotal = ticketType.price_cents * item.quantity;
+    totalCents += lineTotal;
+
     orderItemsToInsert.push({
-      ticket_type_id: tt.id,
-      name: tt.name,
-      quantity: i.quantity,
-      unit_price_cents: unit,
-      total_cents: line,
+      ticket_type_id: ticketType.id,
+      name: ticketType.name,
+      quantity: item.quantity,
+      unit_price_cents: ticketType.price_cents,
+      total_cents: lineTotal,
     });
   }
 
-  const { data: orderRow, error: orderError } = await supabase
-    .from("orders")
-    .insert({
-      event_id: eventId,
-      user_id: userId,
-      status: "pending",
-      total_cents: totalCents,
-      currency: "BRL",
-      buyer_name: buyerName ?? null,
-      buyer_email: resolvedBuyerEmail,
-      buyer_document: buyerDocument ?? null,
-    })
-    .select("id")
-    .single();
+  const reserved: Array<{ ticketTypeId: string; previousSold: number }> = [];
+  for (const [ticketTypeId, quantity] of requestedQuantities) {
+    const ticketType = ticketTypeRows.get(ticketTypeId);
+    if (!ticketType) continue;
 
-  if (orderError || !orderRow) {
-    return NextResponse.json(
-      { message: orderError?.message ?? "Falha ao criar pedido" },
-      { status: 500 },
-    );
-  }
+    const previousSold = ticketType.quantity_sold ?? 0;
+    const nextSold = previousSold + quantity;
 
-  const orderId = orderRow.id as string;
+    const { data: updatedRow, error: reserveError } = await supabase
+      .from("ticket_types")
+      .update({ quantity_sold: nextSold })
+      .eq("id", ticketTypeId)
+      .eq("quantity_sold", previousSold)
+      .select("id")
+      .maybeSingle();
 
-  const { data: itemRows, error: itemsError } = await supabase
-    .from("order_items")
-    .insert(orderItemsToInsert.map((i) => ({ ...i, order_id: orderId })))
-    .select("id,ticket_type_id,quantity")
-    .order("created_at", { ascending: true });
-
-  if (itemsError || !itemRows) {
-    return NextResponse.json(
-      { message: itemsError?.message ?? "Falha ao criar itens" },
-      { status: 500 },
-    );
-  }
-
-  const ticketsToInsert: TicketInsert[] = [];
-  for (const item of itemRows as unknown as OrderItemRow[]) {
-    const qty = item.quantity;
-    const ttId = item.ticket_type_id;
-    for (let n = 0; n < qty; n++) {
-      const code = ticketCode();
-      ticketsToInsert.push({
-        order_id: orderId,
-        order_item_id: item.id,
-        event_id: eventId,
-        ticket_type_id: ttId,
-        user_id: userId,
-        code,
-        qr_payload: `tvq:${code}`,
-        status: "active",
-      });
+    if (reserveError || !updatedRow) {
+      await rollbackStockReservations(ticketTypeRows, reserved);
+      return apiError(
+        409,
+        "Nao foi possivel reservar o estoque. Atualize a pagina e tente novamente.",
+      );
     }
+
+    ticketType.quantity_sold = nextSold;
+    reserved.push({ ticketTypeId, previousSold });
   }
 
-  const { error: ticketsError } = await supabase.from("tickets").insert(ticketsToInsert);
-  if (ticketsError) {
-    return NextResponse.json(
-      { message: ticketsError.message },
-      { status: 500 },
-    );
-  }
+  try {
+    const { data: orderRow, error: orderError } = await supabase
+      .from("orders")
+      .insert({
+        event_id: eventId,
+        user_id: userId,
+        status: "pending",
+        total_cents: totalCents,
+        currency: "BRL",
+        buyer_name: buyerName ?? null,
+        buyer_email: resolvedBuyerEmail,
+        buyer_document: buyerDocument ?? null,
+      })
+      .select("id")
+      .single();
 
-  return NextResponse.json({ orderId }, { status: 201 });
+    if (orderError || !orderRow) {
+      throw new Error(orderError?.message ?? "Falha ao criar pedido.");
+    }
+
+    const orderId = orderRow.id as string;
+
+    const { error: itemsError } = await supabase
+      .from("order_items")
+      .insert(orderItemsToInsert.map((item) => ({ ...item, order_id: orderId })));
+
+    if (itemsError) {
+      throw new Error(itemsError?.message ?? "Falha ao criar itens do pedido.");
+    }
+
+    return NextResponse.json({ orderId }, { status: 201 });
+  } catch (error) {
+    await rollbackStockReservations(ticketTypeRows, reserved);
+    const message = error instanceof Error ? error.message : "Falha ao criar pedido.";
+    return apiError(500, message);
+  }
 }
